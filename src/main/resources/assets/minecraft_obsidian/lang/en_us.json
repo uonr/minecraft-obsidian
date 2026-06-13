@@ -1,5 +1,11 @@
 {
   "moddisplayname.minecraft_obsidian": "Minecraft Obsidian",
+  "config.minecraft_obsidian.local_link_file": "Local fallback links file",
+  "config.minecraft_obsidian.local_link_file.help": "Empty uses config/minecraft_obsidian/links.json. Relative paths start from the Minecraft game directory.",
+  "config.minecraft_obsidian.local_link_file.hint": "Default path",
+  "config.minecraft_obsidian.reset": "Reset",
+  "config.minecraft_obsidian.saved": "Saved",
+  "config.minecraft_obsidian.title": "Minecraft Obsidian Settings",
   "message.minecraft_obsidian.clipboard_not_obsidian": "Clipboard is not an Obsidian URL",
   "message.minecraft_obsidian.hint_linked": "Obsidian link",
   "message.minecraft_obsidian.hint_preview": "%s",

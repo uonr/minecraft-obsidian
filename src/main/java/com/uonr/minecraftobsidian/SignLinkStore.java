@@ -17,19 +17,19 @@ import com.google.gson.JsonSyntaxException;
 import com.google.gson.reflect.TypeToken;
 
 import net.minecraft.core.BlockPos;
-import net.neoforged.fml.loading.FMLPaths;
 
 final class SignLinkStore {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final Type LINKS_TYPE = new TypeToken<Map<String, String>>() {
     }.getType();
 
-    private final Path file;
+    private final String modId;
     private final Map<String, String> links = new LinkedHashMap<>();
+    private Path loadedFile;
     private boolean loaded;
 
     SignLinkStore(String modId) {
-        this.file = FMLPaths.CONFIGDIR.get().resolve(modId).resolve("links.json");
+        this.modId = modId;
     }
 
     Optional<String> get(String worldId, String dimensionId, BlockPos pos) {
@@ -55,6 +55,12 @@ final class SignLinkStore {
     }
 
     private void ensureLoaded() {
+        Path file = ClientConfig.localLinkFile(modId);
+        if (!file.equals(loadedFile)) {
+            links.clear();
+            loaded = false;
+            loadedFile = file;
+        }
         if (loaded) {
             return;
         }
@@ -75,6 +81,13 @@ final class SignLinkStore {
     }
 
     private void save() {
+        Path file = ClientConfig.localLinkFile(modId);
+        if (!file.equals(loadedFile)) {
+            links.clear();
+            loaded = false;
+            loadedFile = file;
+            ensureLoaded();
+        }
         try {
             Files.createDirectories(file.getParent());
             try (Writer writer = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {

@@ -1,5 +1,11 @@
 {
   "moddisplayname.minecraft_obsidian": "Minecraft Obsidian",
+  "config.minecraft_obsidian.local_link_file": "ローカル fallback リンクファイル",
+  "config.minecraft_obsidian.local_link_file.help": "空欄の場合は config/minecraft_obsidian/links.json を使用します。相対パスは Minecraft のゲームディレクトリから解決されます。",
+  "config.minecraft_obsidian.local_link_file.hint": "デフォルトのパス",
+  "config.minecraft_obsidian.reset": "デフォルト",
+  "config.minecraft_obsidian.saved": "保存しました",
+  "config.minecraft_obsidian.title": "Minecraft Obsidian 設定",
   "message.minecraft_obsidian.clipboard_not_obsidian": "クリップボードの内容は Obsidian URL ではありません",
   "message.minecraft_obsidian.hint_linked": "Obsidian リンク",
   "message.minecraft_obsidian.hint_preview": "%s",

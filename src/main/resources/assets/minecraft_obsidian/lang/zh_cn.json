@@ -1,5 +1,11 @@
 {
   "moddisplayname.minecraft_obsidian": "Minecraft Obsidian",
+  "config.minecraft_obsidian.local_link_file": "本地 fallback 链接文件",
+  "config.minecraft_obsidian.local_link_file.help": "留空则使用 config/minecraft_obsidian/links.json。相对路径会从 Minecraft 游戏目录开始解析。",
+  "config.minecraft_obsidian.local_link_file.hint": "默认路径",
+  "config.minecraft_obsidian.reset": "恢复默认",
+  "config.minecraft_obsidian.saved": "已保存",
+  "config.minecraft_obsidian.title": "Minecraft Obsidian 设置",
   "message.minecraft_obsidian.clipboard_not_obsidian": "剪贴板内容不是 Obsidian URL",
   "message.minecraft_obsidian.hint_linked": "Obsidian 链接",
   "message.minecraft_obsidian.hint_preview": "%s",
