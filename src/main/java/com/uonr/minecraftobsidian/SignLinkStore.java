@@ -7,7 +7,9 @@ import java.lang.reflect.Type;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -50,8 +52,35 @@ final class SignLinkStore {
         }
     }
 
+    List<BlockPos> positions(String worldId, String dimensionId) {
+        ensureLoaded();
+        List<BlockPos> positions = new ArrayList<>();
+        String prefix = worldId + "|" + dimensionId + "|";
+        for (String key : links.keySet()) {
+            if (key.startsWith(prefix)) {
+                parsePosition(key.substring(prefix.length())).ifPresent(positions::add);
+            }
+        }
+        return positions;
+    }
+
     private static String key(String worldId, String dimensionId, BlockPos pos) {
         return worldId + "|" + dimensionId + "|" + pos.getX() + "," + pos.getY() + "," + pos.getZ();
+    }
+
+    private static Optional<BlockPos> parsePosition(String value) {
+        String[] parts = value.split(",", 3);
+        if (parts.length != 3) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(new BlockPos(
+                    Integer.parseInt(parts[0]),
+                    Integer.parseInt(parts[1]),
+                    Integer.parseInt(parts[2])));
+        } catch (NumberFormatException exception) {
+            return Optional.empty();
+        }
     }
 
     private void ensureLoaded() {

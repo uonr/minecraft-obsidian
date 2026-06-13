@@ -41,6 +41,8 @@ import net.neoforged.neoforge.network.PacketDistributor;
 final class SignInteractionHandler {
     private static final int CONFIRM_TICKS = 8;
     private static final int REMOVAL_CONFIRM_TICKS = 80;
+    private static final int LOCAL_CLEANUP_INTERVAL_TICKS = 200;
+    private static final int LOCAL_CLEANUP_MAX_CHECKS = 16;
 
     private final SignLinkStore store;
     private final List<PendingPlacement> pendingPlacements = new ArrayList<>();
@@ -49,6 +51,8 @@ final class SignInteractionHandler {
     private StorageMode storageMode = StorageMode.UNKNOWN;
     private ResourceLocation requestedSnapshotDimension;
     private PreviewState previewState;
+    private int localCleanupTicks;
+    private int localCleanupIndex;
 
     SignInteractionHandler(SignLinkStore store) {
         this.store = store;
@@ -86,12 +90,15 @@ final class SignInteractionHandler {
             return;
         }
 
-        if (!player.isShiftKeyDown()) {
+        ItemStack stack = event.getItemStack();
+        if (!(stack.getItem() instanceof SignItem)) {
             return;
         }
 
-        ItemStack stack = event.getItemStack();
-        if (!(stack.getItem() instanceof SignItem)) {
+        List<BlockPos> candidates = placementCandidates(level, event.getHitVec());
+        cleanupLocalPlacementCandidates(worldId, dimensionId, candidates);
+
+        if (!player.isShiftKeyDown()) {
             return;
         }
 
@@ -100,7 +107,6 @@ final class SignInteractionHandler {
             return;
         }
 
-        List<BlockPos> candidates = placementCandidates(level, event.getHitVec());
         if (!candidates.isEmpty()) {
             pendingPlacements.add(new PendingPlacement(worldId, dimensionId, candidates, url.get()));
         }
@@ -142,6 +148,7 @@ final class SignInteractionHandler {
         String worldId = currentWorldId(minecraft);
         String dimensionId = dimensionId(level.dimension());
         previewState = createPreviewState(minecraft, level, worldId, dimensionId).orElse(null);
+        cleanupLoadedLocalLinks(level, worldId, dimensionId);
 
         if (pendingPlacements.isEmpty() && pendingRemovals.isEmpty()) {
             return;
@@ -189,6 +196,8 @@ final class SignInteractionHandler {
         serverLinkedSigns.clear();
         requestedSnapshotDimension = null;
         previewState = null;
+        localCleanupTicks = 0;
+        localCleanupIndex = 0;
         storageMode = StorageMode.UNKNOWN;
     }
 
@@ -254,6 +263,47 @@ final class SignInteractionHandler {
             }
         }
         pendingRemovals.add(new PendingRemoval(worldId, dimensionId, pos));
+    }
+
+    private void cleanupLoadedLocalLinks(ClientLevel level, String worldId, String dimensionId) {
+        if (isServerBacked()) {
+            localCleanupTicks = 0;
+            localCleanupIndex = 0;
+            return;
+        }
+
+        localCleanupTicks++;
+        if (localCleanupTicks < LOCAL_CLEANUP_INTERVAL_TICKS) {
+            return;
+        }
+        localCleanupTicks = 0;
+
+        List<BlockPos> positions = store.positions(worldId, dimensionId);
+        if (positions.isEmpty()) {
+            localCleanupIndex = 0;
+            return;
+        }
+        if (localCleanupIndex >= positions.size()) {
+            localCleanupIndex = 0;
+        }
+
+        int checks = Math.min(LOCAL_CLEANUP_MAX_CHECKS, positions.size());
+        for (int checked = 0; checked < checks; checked++) {
+            BlockPos pos = positions.get(localCleanupIndex);
+            localCleanupIndex = (localCleanupIndex + 1) % positions.size();
+            if (level.isLoaded(pos) && !isSign(level, pos)) {
+                store.remove(worldId, dimensionId, pos);
+            }
+        }
+    }
+
+    private void cleanupLocalPlacementCandidates(String worldId, String dimensionId, List<BlockPos> candidates) {
+        if (isServerBacked()) {
+            return;
+        }
+        for (BlockPos pos : candidates) {
+            store.remove(worldId, dimensionId, pos);
+        }
     }
 
     private static void renderObsidianOutline(RenderHighlightEvent.Block event, AABB bounds) {
