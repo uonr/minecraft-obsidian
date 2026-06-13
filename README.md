@@ -62,7 +62,5 @@ Break the linked sign.
 
 Minecraft Obsidian supports two storage modes:
 
-- **Server-backed storage**: used in singleplayer and on servers that have this mod installed. Links are stored in the world save and can be shared by players who have the client mod.
+- **Server-backed storage**: used in singleplayer and on servers that have this mod installed. Links are stored on the sign block entity as a NeoForge data attachment and can be shared by players who have the client mod.
 - **Local fallback storage**: used on multiplayer servers that do not have this mod installed. Links are stored in the client's config directory at `config/minecraft_obsidian/links.json`.
-
-When joining a world or server, the mod prints a chat message indicating which mode is active.

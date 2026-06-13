@@ -13,6 +13,7 @@ public class MinecraftObsidian {
     public static final Logger LOGGER = LogUtils.getLogger();
 
     public MinecraftObsidian(IEventBus modEventBus) {
+        ModAttachments.register(modEventBus);
         modEventBus.addListener(ModNetworking::register);
         NeoForge.EVENT_BUS.register(new ServerSignEvents());
     }

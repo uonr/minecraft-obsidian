@@ -43,6 +43,7 @@ final class SignInteractionHandler {
     private static final int REMOVAL_CONFIRM_TICKS = 80;
     private static final int LOCAL_CLEANUP_INTERVAL_TICKS = 200;
     private static final int LOCAL_CLEANUP_MAX_CHECKS = 16;
+    private static final int SERVER_SNAPSHOT_INTERVAL_TICKS = 100;
 
     private final SignLinkStore store;
     private final List<PendingPlacement> pendingPlacements = new ArrayList<>();
@@ -53,6 +54,7 @@ final class SignInteractionHandler {
     private PreviewState previewState;
     private int localCleanupTicks;
     private int localCleanupIndex;
+    private int serverSnapshotTicks;
 
     SignInteractionHandler(SignLinkStore store) {
         this.store = store;
@@ -198,6 +200,7 @@ final class SignInteractionHandler {
         previewState = null;
         localCleanupTicks = 0;
         localCleanupIndex = 0;
+        serverSnapshotTicks = 0;
         storageMode = StorageMode.UNKNOWN;
     }
 
@@ -425,6 +428,7 @@ final class SignInteractionHandler {
         storageMode = newMode;
         serverLinkedSigns.clear();
         requestedSnapshotDimension = null;
+        serverSnapshotTicks = 0;
         if (announce) {
             String messageKey = switch (storageMode) {
                 case SERVER -> "message.minecraft_obsidian.mode_server";
@@ -471,9 +475,11 @@ final class SignInteractionHandler {
             return;
         }
         ResourceLocation dimension = minecraft.level.dimension().location();
-        if (dimension.equals(requestedSnapshotDimension)) {
+        if (dimension.equals(requestedSnapshotDimension) && serverSnapshotTicks < SERVER_SNAPSHOT_INTERVAL_TICKS) {
+            serverSnapshotTicks++;
             return;
         }
+        serverSnapshotTicks = 0;
         requestedSnapshotDimension = dimension;
         PacketDistributor.sendToServer(new ObsidianSignPayloads.RequestLinkedSigns(dimension));
     }

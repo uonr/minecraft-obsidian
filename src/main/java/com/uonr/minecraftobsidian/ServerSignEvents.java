@@ -15,19 +15,7 @@ final class ServerSignEvents {
         }
         Player player = event.getPlayer();
         if (player != null && event.getState().getBlock() instanceof SignBlock) {
-            if (ServerSignLinkData.get(level.getServer()).remove(level.dimension().location(), event.getPos())) {
-                ServerSignPayloadHandler.broadcastLinkUpdate(level, level.dimension().location(), event.getPos(), false, "");
-            }
-        }
-    }
-
-    @SubscribeEvent(priority = EventPriority.LOWEST)
-    public void onBlockPlace(BlockEvent.EntityPlaceEvent event) {
-        if (event.isCanceled() || !(event.getLevel() instanceof ServerLevel level)) {
-            return;
-        }
-        if (event.getPlacedBlock().getBlock() instanceof SignBlock) {
-            if (ServerSignLinkData.get(level.getServer()).remove(level.dimension().location(), event.getPos())) {
+            if (ServerSignLinks.remove(level, event.getPos())) {
                 ServerSignPayloadHandler.broadcastLinkUpdate(level, level.dimension().location(), event.getPos(), false, "");
             }
         }
