@@ -9,6 +9,8 @@ import java.util.Optional;
 
 import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.ServerData;
 import net.minecraft.client.renderer.LevelRenderer;
@@ -31,6 +33,7 @@ import net.minecraft.world.phys.Vec3;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
+import net.neoforged.neoforge.client.event.RenderGuiEvent;
 import net.neoforged.neoforge.client.event.RenderHighlightEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
@@ -45,6 +48,7 @@ final class SignInteractionHandler {
     private final Map<BlockPos, String> serverLinkedSigns = new HashMap<>();
     private StorageMode storageMode = StorageMode.UNKNOWN;
     private ResourceLocation requestedSnapshotDimension;
+    private PreviewState previewState;
 
     SignInteractionHandler(SignLinkStore store) {
         this.store = store;
@@ -137,7 +141,7 @@ final class SignInteractionHandler {
         updateStorageMode(minecraft, true);
         String worldId = currentWorldId(minecraft);
         String dimensionId = dimensionId(level.dimension());
-        displayLinkedSignHint(minecraft, level, worldId, dimensionId);
+        previewState = createPreviewState(minecraft, level, worldId, dimensionId).orElse(null);
 
         if (pendingPlacements.isEmpty() && pendingRemovals.isEmpty()) {
             return;
@@ -170,11 +174,21 @@ final class SignInteractionHandler {
     }
 
     @SubscribeEvent
+    public void onRenderGui(RenderGuiEvent.Post event) {
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft.player == null || previewState == null) {
+            return;
+        }
+        renderPreviewPanel(event.getGuiGraphics(), minecraft.font, previewState);
+    }
+
+    @SubscribeEvent
     public void onLoggingOut(ClientPlayerNetworkEvent.LoggingOut event) {
         pendingPlacements.clear();
         pendingRemovals.clear();
         serverLinkedSigns.clear();
         requestedSnapshotDimension = null;
+        previewState = null;
         storageMode = StorageMode.UNKNOWN;
     }
 
@@ -275,23 +289,26 @@ final class SignInteractionHandler {
         return true;
     }
 
-    private void displayLinkedSignHint(Minecraft minecraft, ClientLevel level, String worldId, String dimensionId) {
+    private Optional<PreviewState> createPreviewState(Minecraft minecraft, ClientLevel level, String worldId, String dimensionId) {
         if (!(minecraft.hitResult instanceof BlockHitResult hit) || hit.getType() != HitResult.Type.BLOCK) {
-            return;
+            return Optional.empty();
         }
         if (!isLinkedSign(level, worldId, dimensionId, hit.getBlockPos())) {
-            return;
+            return Optional.empty();
         }
 
-        Optional<String> url = linkedSignUrl(worldId, dimensionId, hit.getBlockPos());
-        if (url.isEmpty()) {
-            return;
+        Optional<String> currentUrl = linkedSignUrl(worldId, dimensionId, hit.getBlockPos());
+        if (currentUrl.isEmpty()) {
+            return Optional.empty();
         }
 
-        String key = minecraft.player.isShiftKeyDown()
-                ? "message.minecraft_obsidian.hint_update"
-                : "message.minecraft_obsidian.hint_preview";
-        minecraft.player.displayClientMessage(Component.translatable(key, UrlPreview.fromUrl(url.get())), true);
+        Optional<String> clipboardUrl = minecraft.player.isShiftKeyDown()
+                ? ObsidianClipboard.readObsidianUrl(minecraft)
+                : Optional.empty();
+        if (clipboardUrl.isPresent() && !clipboardUrl.get().equals(currentUrl.get())) {
+            return Optional.of(new PreviewState(UrlPreview.fromUrl(currentUrl.get()), UrlPreview.fromUrl(clipboardUrl.get())));
+        }
+        return Optional.of(new PreviewState(UrlPreview.fromUrl(currentUrl.get()), null));
     }
 
     private boolean tryOpenLinkedSign(ClientLevel level, String worldId, String dimensionId, ResourceLocation dimension, BlockPos pos, Player player) {
@@ -444,10 +461,72 @@ final class SignInteractionHandler {
         return dimension.location().toString();
     }
 
+    private static void renderPreviewPanel(GuiGraphics gui, Font font, PreviewState state) {
+        int maxWidth = Math.min((int) (gui.guiWidth() * 0.72F), 420);
+        int contentWidth = Math.max(120, maxWidth - 20);
+        String current = fitMiddle(font, state.currentUrl(), contentWidth);
+        String updatePrefix = Component.translatable("message.minecraft_obsidian.preview_update_prefix").getString();
+        String update = state.updateUrl() == null ? null : updatePrefix + fitMiddle(font, state.updateUrl(), Math.max(20, contentWidth - font.width(updatePrefix)));
+
+        int panelWidth = font.width(current);
+        if (update != null) {
+            panelWidth = Math.max(panelWidth, font.width(update));
+        }
+        panelWidth = Math.min(panelWidth + 20, maxWidth);
+
+        int lines = update == null ? 1 : 2;
+        int panelHeight = lines == 1 ? 22 : 34;
+        int x = (gui.guiWidth() - panelWidth) / 2;
+        int y = Math.max(12, gui.guiHeight() / 2 + 24);
+
+        gui.fill(x, y, x + panelWidth, y + panelHeight, 0xD00B0613);
+        gui.fill(x, y, x + panelWidth, y + 1, 0xFF8B5CFF);
+        gui.fill(x, y + panelHeight - 1, x + panelWidth, y + panelHeight, 0xFF3B0A74);
+        gui.fill(x, y, x + 1, y + panelHeight, 0xFF6E32D8);
+        gui.fill(x + panelWidth - 1, y, x + panelWidth, y + panelHeight, 0xFF6E32D8);
+
+        gui.drawString(font, current, x + 10, y + 7, 0xFFE9DDFF, false);
+        if (update != null) {
+            gui.drawString(font, update, x + 10, y + 19, 0xFFBFA7FF, false);
+        }
+    }
+
+    private static String fitMiddle(Font font, String value, int maxWidth) {
+        if (font.width(value) <= maxWidth) {
+            return value;
+        }
+
+        String marker = "...";
+        int markerWidth = font.width(marker);
+        if (markerWidth >= maxWidth) {
+            return marker;
+        }
+
+        int leftLength = Math.max(1, value.length() / 2);
+        int rightLength = Math.max(1, value.length() - leftLength);
+        while (leftLength + rightLength > 2) {
+            String candidate = value.substring(0, leftLength) + marker + value.substring(value.length() - rightLength);
+            if (font.width(candidate) <= maxWidth) {
+                return candidate;
+            }
+            if (leftLength > rightLength && leftLength > 1) {
+                leftLength--;
+            } else if (rightLength > 1) {
+                rightLength--;
+            } else {
+                leftLength--;
+            }
+        }
+        return marker;
+    }
+
     private enum StorageMode {
         UNKNOWN,
         LOCAL,
         SERVER
+    }
+
+    private record PreviewState(String currentUrl, String updateUrl) {
     }
 
     private static final class PendingPlacement {
