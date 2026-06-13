@@ -1,0 +1,17 @@
+{
+  "moddisplayname.minecraft_obsidian": "Minecraft Obsidian",
+  "message.minecraft_obsidian.clipboard_not_obsidian": "剪贴板内容不是 Obsidian URL",
+  "message.minecraft_obsidian.invalid_server_url": "服务器发送了无效的 Obsidian 链接",
+  "message.minecraft_obsidian.link_failed": "无法关联告示牌",
+  "message.minecraft_obsidian.linked_local": "已在本地将告示牌关联到 Obsidian URL",
+  "message.minecraft_obsidian.linked_server": "已在服务器将告示牌关联到 Obsidian URL",
+  "message.minecraft_obsidian.mode_local": "Obsidian 告示牌：服务器不支持，正在使用本地存储",
+  "message.minecraft_obsidian.mode_server": "Obsidian 告示牌：已启用服务器存储",
+  "message.minecraft_obsidian.no_link": "这个告示牌没有 Obsidian 链接",
+  "message.minecraft_obsidian.open_failed": "无法打开 Obsidian 链接",
+  "message.minecraft_obsidian.opened": "已打开 Obsidian 链接",
+  "message.minecraft_obsidian.remove_failed": "无法移除告示牌链接",
+  "message.minecraft_obsidian.remove_sign_exists": "告示牌仍存在，无法移除链接",
+  "message.minecraft_obsidian.removed_local": "已移除本地 Obsidian 告示牌链接",
+  "message.minecraft_obsidian.removed_server": "已从服务器移除 Obsidian 告示牌链接"
+}

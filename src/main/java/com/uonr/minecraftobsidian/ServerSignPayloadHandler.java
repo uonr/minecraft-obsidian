@@ -17,34 +17,34 @@ final class ServerSignPayloadHandler {
     static void handleBind(ObsidianSignPayloads.BindSign payload, IPayloadContext context) {
         ServerPlayer player = (ServerPlayer) context.player();
         if (!isValidCurrentDimension(player, payload.dimension()) || !isNearby(player, payload.pos()) || !isSign(player, payload.pos())) {
-            context.reply(new ObsidianSignPayloads.OperationResult(false, "Could not link sign"));
+            context.reply(new ObsidianSignPayloads.OperationResult(false, "message.minecraft_obsidian.link_failed"));
             return;
         }
         if (!ObsidianUrls.isObsidianUrl(payload.url())) {
-            context.reply(new ObsidianSignPayloads.OperationResult(false, "Clipboard is not an Obsidian URL"));
+            context.reply(new ObsidianSignPayloads.OperationResult(false, "message.minecraft_obsidian.clipboard_not_obsidian"));
             return;
         }
 
         ServerSignLinkData.get(player.server).put(payload.dimension(), payload.pos(), payload.url().trim());
         broadcastLinkUpdate((ServerLevel) player.level(), payload.dimension(), payload.pos(), true);
-        context.reply(new ObsidianSignPayloads.OperationResult(true, "Linked sign to Obsidian URL on server"));
+        context.reply(new ObsidianSignPayloads.OperationResult(true, "message.minecraft_obsidian.linked_server"));
     }
 
     static void handleRemove(ObsidianSignPayloads.RemoveSign payload, IPayloadContext context) {
         ServerPlayer player = (ServerPlayer) context.player();
         if (!isValidCurrentDimension(player, payload.dimension()) || !isNearby(player, payload.pos())) {
-            context.reply(new ObsidianSignPayloads.OperationResult(false, "Could not remove sign link"));
+            context.reply(new ObsidianSignPayloads.OperationResult(false, "message.minecraft_obsidian.remove_failed"));
             return;
         }
         if (isSign(player, payload.pos())) {
-            context.reply(new ObsidianSignPayloads.OperationResult(false, "Cannot remove link while sign still exists"));
+            context.reply(new ObsidianSignPayloads.OperationResult(false, "message.minecraft_obsidian.remove_sign_exists"));
             return;
         }
 
         boolean removed = ServerSignLinkData.get(player.server).remove(payload.dimension(), payload.pos());
         if (removed) {
             broadcastLinkUpdate((ServerLevel) player.level(), payload.dimension(), payload.pos(), false);
-            context.reply(new ObsidianSignPayloads.OperationResult(true, "Removed Obsidian sign link from server"));
+            context.reply(new ObsidianSignPayloads.OperationResult(true, "message.minecraft_obsidian.removed_server"));
         }
     }
 

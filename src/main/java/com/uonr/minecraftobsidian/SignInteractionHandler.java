@@ -158,7 +158,7 @@ final class SignInteractionHandler {
                     PacketDistributor.sendToServer(new ObsidianSignPayloads.BindSign(level.dimension().location(), pos, pending.url()));
                 } else {
                     store.put(worldId, dimensionId, pos, pending.url());
-                    minecraft.player.displayClientMessage(Component.literal("Linked sign to Obsidian URL locally"), true);
+                    minecraft.player.displayClientMessage(Component.translatable("message.minecraft_obsidian.linked_local"), true);
                 }
                 iterator.remove();
                 continue;
@@ -184,7 +184,7 @@ final class SignInteractionHandler {
                     PacketDistributor.sendToServer(new ObsidianSignPayloads.RemoveSign(level.dimension().location(), pending.pos()));
                 } else {
                     store.remove(worldId, dimensionId, pending.pos());
-                    minecraft.player.displayClientMessage(Component.literal("Removed local Obsidian sign link"), true);
+                    minecraft.player.displayClientMessage(Component.translatable("message.minecraft_obsidian.removed_local"), true);
                 }
                 iterator.remove();
                 continue;
@@ -229,10 +229,10 @@ final class SignInteractionHandler {
 
         try {
             Util.getPlatform().openUri(url.get());
-            player.displayClientMessage(Component.literal("Opened Obsidian link"), true);
+            player.displayClientMessage(Component.translatable("message.minecraft_obsidian.opened"), true);
         } catch (RuntimeException exception) {
             MinecraftObsidianClient.LOGGER.warn("Could not open Obsidian URL {}", url.get(), exception);
-            player.displayClientMessage(Component.literal("Could not open Obsidian link"), false);
+            player.displayClientMessage(Component.translatable("message.minecraft_obsidian.open_failed"), false);
         }
         return true;
     }
@@ -254,13 +254,13 @@ final class SignInteractionHandler {
         serverLinkedSigns.clear();
         requestedSnapshotDimension = null;
         if (announce) {
-            String message = switch (storageMode) {
-                case SERVER -> "Obsidian signs: server-backed storage enabled";
-                case LOCAL -> "Obsidian signs: server has no support, using local storage";
+            String messageKey = switch (storageMode) {
+                case SERVER -> "message.minecraft_obsidian.mode_server";
+                case LOCAL -> "message.minecraft_obsidian.mode_local";
                 case UNKNOWN -> "";
             };
-            if (!message.isEmpty()) {
-                minecraft.player.displayClientMessage(Component.literal(message), false);
+            if (!messageKey.isEmpty()) {
+                minecraft.player.displayClientMessage(Component.translatable(messageKey), false);
             }
         }
         if (storageMode == StorageMode.SERVER) {

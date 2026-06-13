@@ -1,0 +1,17 @@
+{
+  "moddisplayname.minecraft_obsidian": "Minecraft Obsidian",
+  "message.minecraft_obsidian.clipboard_not_obsidian": "クリップボードの内容は Obsidian URL ではありません",
+  "message.minecraft_obsidian.invalid_server_url": "サーバーから無効な Obsidian リンクが送信されました",
+  "message.minecraft_obsidian.link_failed": "看板を関連付けできませんでした",
+  "message.minecraft_obsidian.linked_local": "看板をローカルの Obsidian URL に関連付けました",
+  "message.minecraft_obsidian.linked_server": "看板をサーバー上の Obsidian URL に関連付けました",
+  "message.minecraft_obsidian.mode_local": "Obsidian 看板: サーバーが未対応のため、ローカル保存を使用します",
+  "message.minecraft_obsidian.mode_server": "Obsidian 看板: サーバー保存が有効です",
+  "message.minecraft_obsidian.no_link": "この看板には Obsidian リンクがありません",
+  "message.minecraft_obsidian.open_failed": "Obsidian リンクを開けませんでした",
+  "message.minecraft_obsidian.opened": "Obsidian リンクを開きました",
+  "message.minecraft_obsidian.remove_failed": "看板リンクを削除できませんでした",
+  "message.minecraft_obsidian.remove_sign_exists": "看板がまだ存在するため、リンクを削除できません",
+  "message.minecraft_obsidian.removed_local": "ローカルの Obsidian 看板リンクを削除しました",
+  "message.minecraft_obsidian.removed_server": "サーバーから Obsidian 看板リンクを削除しました"
+}

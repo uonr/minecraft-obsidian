@@ -20,29 +20,29 @@ final class ClientSignPayloadHandler {
             return;
         }
         if (!payload.found()) {
-            minecraft.player.displayClientMessage(Component.literal("No Obsidian link found for this sign"), true);
+            minecraft.player.displayClientMessage(Component.translatable("message.minecraft_obsidian.no_link"), true);
             return;
         }
         String url = payload.url().trim();
         if (!ObsidianUrls.isObsidianUrl(url)) {
             MinecraftObsidianClient.LOGGER.warn("Server sent non-Obsidian URL: {}", payload.url());
-            minecraft.player.displayClientMessage(Component.literal("Server sent an invalid Obsidian link"), false);
+            minecraft.player.displayClientMessage(Component.translatable("message.minecraft_obsidian.invalid_server_url"), false);
             return;
         }
 
         try {
             Util.getPlatform().openUri(url);
-            minecraft.player.displayClientMessage(Component.literal("Opened Obsidian link"), true);
+            minecraft.player.displayClientMessage(Component.translatable("message.minecraft_obsidian.opened"), true);
         } catch (RuntimeException exception) {
             MinecraftObsidianClient.LOGGER.warn("Could not open Obsidian URL {}", url, exception);
-            minecraft.player.displayClientMessage(Component.literal("Could not open Obsidian link"), false);
+            minecraft.player.displayClientMessage(Component.translatable("message.minecraft_obsidian.open_failed"), false);
         }
     }
 
     static void handleOperationResult(ObsidianSignPayloads.OperationResult payload) {
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.player != null && !payload.message().isBlank()) {
-            minecraft.player.displayClientMessage(Component.literal(payload.message()), !payload.success());
+            minecraft.player.displayClientMessage(Component.translatable(payload.message()), !payload.success());
         }
     }
 
