@@ -25,9 +25,11 @@ final class ServerSignPayloadHandler {
             return;
         }
 
-        ServerSignLinkData.get(player.server).put(payload.dimension(), payload.pos(), payload.url().trim());
+        ServerSignLinkData data = ServerSignLinkData.get(player.server);
+        boolean existed = data.get(payload.dimension(), payload.pos()).isPresent();
+        data.put(payload.dimension(), payload.pos(), payload.url().trim());
         broadcastLinkUpdate((ServerLevel) player.level(), payload.dimension(), payload.pos(), true);
-        context.reply(new ObsidianSignPayloads.OperationResult(true, "message.minecraft_obsidian.linked_server"));
+        context.reply(new ObsidianSignPayloads.OperationResult(true, existed ? "message.minecraft_obsidian.updated_server" : "message.minecraft_obsidian.linked_server"));
     }
 
     static void handleRemove(ObsidianSignPayloads.RemoveSign payload, IPayloadContext context) {

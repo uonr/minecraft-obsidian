@@ -13,5 +13,7 @@
   "message.minecraft_obsidian.remove_failed": "无法移除告示牌链接",
   "message.minecraft_obsidian.remove_sign_exists": "告示牌仍存在，无法移除链接",
   "message.minecraft_obsidian.removed_local": "已移除本地 Obsidian 告示牌链接",
-  "message.minecraft_obsidian.removed_server": "已从服务器移除 Obsidian 告示牌链接"
+  "message.minecraft_obsidian.removed_server": "已从服务器移除 Obsidian 告示牌链接",
+  "message.minecraft_obsidian.updated_local": "已更新本地 Obsidian 告示牌链接",
+  "message.minecraft_obsidian.updated_server": "已更新服务器上的 Obsidian 告示牌链接"
 }

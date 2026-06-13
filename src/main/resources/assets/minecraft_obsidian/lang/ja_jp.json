@@ -13,5 +13,7 @@
   "message.minecraft_obsidian.remove_failed": "看板リンクを削除できませんでした",
   "message.minecraft_obsidian.remove_sign_exists": "看板がまだ存在するため、リンクを削除できません",
   "message.minecraft_obsidian.removed_local": "ローカルの Obsidian 看板リンクを削除しました",
-  "message.minecraft_obsidian.removed_server": "サーバーから Obsidian 看板リンクを削除しました"
+  "message.minecraft_obsidian.removed_server": "サーバーから Obsidian 看板リンクを削除しました",
+  "message.minecraft_obsidian.updated_local": "ローカルの Obsidian 看板リンクを更新しました",
+  "message.minecraft_obsidian.updated_server": "サーバー上の Obsidian 看板リンクを更新しました"
 }

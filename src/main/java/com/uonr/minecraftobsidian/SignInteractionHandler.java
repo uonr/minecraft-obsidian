@@ -64,6 +64,12 @@ final class SignInteractionHandler {
         ResourceLocation dimension = level.dimension().location();
         BlockPos clickedPos = event.getPos();
 
+        if (tryUpdateLinkedSign(level, worldId, dimensionId, dimension, clickedPos, player, minecraft)) {
+            event.setCanceled(true);
+            event.setCancellationResult(InteractionResult.SUCCESS);
+            return;
+        }
+
         if (tryOpenLinkedSign(level, worldId, dimensionId, dimension, clickedPos, player)) {
             event.setCanceled(true);
             event.setCancellationResult(InteractionResult.SUCCESS);
@@ -204,6 +210,31 @@ final class SignInteractionHandler {
             }
         }
         pendingRemovals.add(new PendingRemoval(worldId, dimensionId, pos));
+    }
+
+    private boolean tryUpdateLinkedSign(ClientLevel level, String worldId, String dimensionId, ResourceLocation dimension, BlockPos pos, Player player, Minecraft minecraft) {
+        if (!player.isShiftKeyDown() || !isSign(level, pos)) {
+            return false;
+        }
+
+        Optional<String> url = ObsidianClipboard.readObsidianUrl(minecraft);
+        if (url.isEmpty()) {
+            return false;
+        }
+
+        if (isServerBacked()) {
+            if (!serverLinkedSigns.contains(pos)) {
+                return false;
+            }
+            PacketDistributor.sendToServer(new ObsidianSignPayloads.BindSign(dimension, pos, url.get()));
+        } else {
+            if (store.get(worldId, dimensionId, pos).isEmpty()) {
+                return false;
+            }
+            store.put(worldId, dimensionId, pos, url.get());
+            minecraft.player.displayClientMessage(Component.translatable("message.minecraft_obsidian.updated_local"), true);
+        }
+        return true;
     }
 
     private boolean tryOpenLinkedSign(ClientLevel level, String worldId, String dimensionId, ResourceLocation dimension, BlockPos pos, Player player) {

@@ -13,5 +13,7 @@
   "message.minecraft_obsidian.remove_failed": "Could not remove sign link",
   "message.minecraft_obsidian.remove_sign_exists": "Cannot remove link while sign still exists",
   "message.minecraft_obsidian.removed_local": "Removed local Obsidian sign link",
-  "message.minecraft_obsidian.removed_server": "Removed Obsidian sign link from server"
+  "message.minecraft_obsidian.removed_server": "Removed Obsidian sign link from server",
+  "message.minecraft_obsidian.updated_local": "Updated local Obsidian sign link",
+  "message.minecraft_obsidian.updated_server": "Updated Obsidian sign link on server"
 }
