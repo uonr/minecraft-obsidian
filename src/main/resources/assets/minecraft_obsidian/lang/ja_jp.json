@@ -1,6 +1,9 @@
 {
   "moddisplayname.minecraft_obsidian": "Minecraft Obsidian",
   "message.minecraft_obsidian.clipboard_not_obsidian": "クリップボードの内容は Obsidian URL ではありません",
+  "message.minecraft_obsidian.hint_linked": "Obsidian リンク",
+  "message.minecraft_obsidian.hint_preview": "Obsidian: %s",
+  "message.minecraft_obsidian.hint_update": "Obsidian: %s - Shift + 右クリックでクリップボードから更新",
   "message.minecraft_obsidian.invalid_server_url": "サーバーから無効な Obsidian リンクが送信されました",
   "message.minecraft_obsidian.link_failed": "看板を関連付けできませんでした",
   "message.minecraft_obsidian.linked_local": "看板をローカルの Obsidian URL に関連付けました",

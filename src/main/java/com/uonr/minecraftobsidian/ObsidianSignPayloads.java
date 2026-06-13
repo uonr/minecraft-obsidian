@@ -132,7 +132,18 @@ final class ObsidianSignPayloads {
         }
     }
 
-    record LinkedSignsSnapshot(ResourceLocation dimension, List<BlockPos> positions) implements CustomPacketPayload {
+    record LinkedSignEntry(BlockPos pos, String url) {
+        private static LinkedSignEntry read(RegistryFriendlyByteBuf buf) {
+            return new LinkedSignEntry(buf.readBlockPos(), buf.readUtf(MAX_URL_LENGTH));
+        }
+
+        private void write(RegistryFriendlyByteBuf buf) {
+            buf.writeBlockPos(pos);
+            buf.writeUtf(url, MAX_URL_LENGTH);
+        }
+    }
+
+    record LinkedSignsSnapshot(ResourceLocation dimension, List<LinkedSignEntry> entries) implements CustomPacketPayload {
         static final Type<LinkedSignsSnapshot> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(ModConstants.MODID, "linked_signs_snapshot"));
         static final StreamCodec<RegistryFriendlyByteBuf, LinkedSignsSnapshot> STREAM_CODEC = StreamCodec.ofMember(LinkedSignsSnapshot::write, LinkedSignsSnapshot::read);
 
@@ -143,20 +154,20 @@ final class ObsidianSignPayloads {
                 throw new IllegalArgumentException("Invalid linked sign snapshot size: " + size);
             }
 
-            java.util.ArrayList<BlockPos> positions = new java.util.ArrayList<>(size);
+            java.util.ArrayList<LinkedSignEntry> entries = new java.util.ArrayList<>(size);
             for (int i = 0; i < size; i++) {
-                positions.add(buf.readBlockPos());
+                entries.add(LinkedSignEntry.read(buf));
             }
-            return new LinkedSignsSnapshot(dimension, List.copyOf(positions));
+            return new LinkedSignsSnapshot(dimension, List.copyOf(entries));
         }
 
         private void write(RegistryFriendlyByteBuf buf) {
-            if (positions.size() > MAX_SNAPSHOT_SIZE) {
-                throw new IllegalArgumentException("Linked sign snapshot is too large: " + positions.size());
+            if (entries.size() > MAX_SNAPSHOT_SIZE) {
+                throw new IllegalArgumentException("Linked sign snapshot is too large: " + entries.size());
             }
             buf.writeResourceLocation(dimension);
-            buf.writeVarInt(positions.size());
-            positions.forEach(buf::writeBlockPos);
+            buf.writeVarInt(entries.size());
+            entries.forEach(entry -> entry.write(buf));
         }
 
         @Override
@@ -165,18 +176,19 @@ final class ObsidianSignPayloads {
         }
     }
 
-    record LinkedSignUpdate(ResourceLocation dimension, BlockPos pos, boolean linked) implements CustomPacketPayload {
+    record LinkedSignUpdate(ResourceLocation dimension, BlockPos pos, boolean linked, String url) implements CustomPacketPayload {
         static final Type<LinkedSignUpdate> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(ModConstants.MODID, "linked_sign_update"));
         static final StreamCodec<RegistryFriendlyByteBuf, LinkedSignUpdate> STREAM_CODEC = StreamCodec.ofMember(LinkedSignUpdate::write, LinkedSignUpdate::read);
 
         private static LinkedSignUpdate read(RegistryFriendlyByteBuf buf) {
-            return new LinkedSignUpdate(buf.readResourceLocation(), buf.readBlockPos(), buf.readBoolean());
+            return new LinkedSignUpdate(buf.readResourceLocation(), buf.readBlockPos(), buf.readBoolean(), buf.readUtf(MAX_URL_LENGTH));
         }
 
         private void write(RegistryFriendlyByteBuf buf) {
             buf.writeResourceLocation(dimension);
             buf.writeBlockPos(pos);
             buf.writeBoolean(linked);
+            buf.writeUtf(url, MAX_URL_LENGTH);
         }
 
         @Override

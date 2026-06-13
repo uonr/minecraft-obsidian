@@ -1,6 +1,9 @@
 {
   "moddisplayname.minecraft_obsidian": "Minecraft Obsidian",
   "message.minecraft_obsidian.clipboard_not_obsidian": "剪贴板内容不是 Obsidian URL",
+  "message.minecraft_obsidian.hint_linked": "Obsidian 链接",
+  "message.minecraft_obsidian.hint_preview": "Obsidian：%s",
+  "message.minecraft_obsidian.hint_update": "Obsidian：%s - Shift + 右键可用剪贴板更新",
   "message.minecraft_obsidian.invalid_server_url": "服务器发送了无效的 Obsidian 链接",
   "message.minecraft_obsidian.link_failed": "无法关联告示牌",
   "message.minecraft_obsidian.linked_local": "已在本地将告示牌关联到 Obsidian URL",

@@ -16,7 +16,7 @@ final class ServerSignEvents {
         Player player = event.getPlayer();
         if (player != null && event.getState().getBlock() instanceof SignBlock) {
             if (ServerSignLinkData.get(level.getServer()).remove(level.dimension().location(), event.getPos())) {
-                ServerSignPayloadHandler.broadcastLinkUpdate(level, level.dimension().location(), event.getPos(), false);
+                ServerSignPayloadHandler.broadcastLinkUpdate(level, level.dimension().location(), event.getPos(), false, "");
             }
         }
     }

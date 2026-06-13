@@ -1,16 +1,18 @@
 package com.uonr.minecraftobsidian;
 
 import java.util.ArrayList;
-import java.util.HashSet;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 
 import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.ServerData;
+import net.minecraft.client.renderer.LevelRenderer;
+import net.minecraft.client.renderer.RenderType;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
@@ -22,10 +24,14 @@ import net.minecraft.world.item.SignItem;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.SignBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
+import net.neoforged.neoforge.client.event.RenderHighlightEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import net.neoforged.neoforge.network.PacketDistributor;
 
@@ -36,7 +42,7 @@ final class SignInteractionHandler {
     private final SignLinkStore store;
     private final List<PendingPlacement> pendingPlacements = new ArrayList<>();
     private final List<PendingRemoval> pendingRemovals = new ArrayList<>();
-    private final Set<BlockPos> serverLinkedSigns = new HashSet<>();
+    private final Map<BlockPos, String> serverLinkedSigns = new HashMap<>();
     private StorageMode storageMode = StorageMode.UNKNOWN;
     private ResourceLocation requestedSnapshotDimension;
 
@@ -129,14 +135,38 @@ final class SignInteractionHandler {
             return;
         }
         updateStorageMode(minecraft, true);
+        String worldId = currentWorldId(minecraft);
+        String dimensionId = dimensionId(level.dimension());
+        displayLinkedSignHint(minecraft, level, worldId, dimensionId);
+
         if (pendingPlacements.isEmpty() && pendingRemovals.isEmpty()) {
             return;
         }
 
-        String worldId = currentWorldId(minecraft);
-        String dimensionId = dimensionId(level.dimension());
         processPendingPlacements(minecraft, level, worldId, dimensionId);
         processPendingRemovals(minecraft, level, worldId, dimensionId);
+    }
+
+    @SubscribeEvent
+    public void onRenderBlockHighlight(RenderHighlightEvent.Block event) {
+        Minecraft minecraft = Minecraft.getInstance();
+        ClientLevel level = minecraft.level;
+        if (level == null || minecraft.player == null) {
+            return;
+        }
+
+        BlockPos pos = event.getTarget().getBlockPos();
+        if (!isLinkedSign(level, currentWorldId(minecraft), dimensionId(level.dimension()), pos)) {
+            return;
+        }
+
+        event.setCanceled(true);
+        Vec3 camera = event.getCamera().getPosition();
+        BlockState state = level.getBlockState(pos);
+        AABB bounds = state.getShape(level, pos).isEmpty()
+                ? new AABB(pos)
+                : state.getShape(level, pos).bounds().move(pos);
+        renderObsidianOutline(event, bounds.move(-camera.x, -camera.y, -camera.z));
     }
 
     @SubscribeEvent
@@ -212,6 +242,14 @@ final class SignInteractionHandler {
         pendingRemovals.add(new PendingRemoval(worldId, dimensionId, pos));
     }
 
+    private static void renderObsidianOutline(RenderHighlightEvent.Block event, AABB bounds) {
+        var buffer = event.getMultiBufferSource().getBuffer(RenderType.lines());
+        // Layered boxes make the outline read thicker while staying in vanilla's line renderer.
+        LevelRenderer.renderLineBox(event.getPoseStack(), buffer, bounds.inflate(0.004D), 0.47F, 0.18F, 0.95F, 1.0F);
+        LevelRenderer.renderLineBox(event.getPoseStack(), buffer, bounds.inflate(0.010D), 0.64F, 0.30F, 1.0F, 0.92F);
+        LevelRenderer.renderLineBox(event.getPoseStack(), buffer, bounds.inflate(0.016D), 0.24F, 0.04F, 0.55F, 0.82F);
+    }
+
     private boolean tryUpdateLinkedSign(ClientLevel level, String worldId, String dimensionId, ResourceLocation dimension, BlockPos pos, Player player, Minecraft minecraft) {
         if (!player.isShiftKeyDown() || !isSign(level, pos)) {
             return false;
@@ -223,7 +261,7 @@ final class SignInteractionHandler {
         }
 
         if (isServerBacked()) {
-            if (!serverLinkedSigns.contains(pos)) {
+            if (!serverLinkedSigns.containsKey(pos)) {
                 return false;
             }
             PacketDistributor.sendToServer(new ObsidianSignPayloads.BindSign(dimension, pos, url.get()));
@@ -237,6 +275,25 @@ final class SignInteractionHandler {
         return true;
     }
 
+    private void displayLinkedSignHint(Minecraft minecraft, ClientLevel level, String worldId, String dimensionId) {
+        if (!(minecraft.hitResult instanceof BlockHitResult hit) || hit.getType() != HitResult.Type.BLOCK) {
+            return;
+        }
+        if (!isLinkedSign(level, worldId, dimensionId, hit.getBlockPos())) {
+            return;
+        }
+
+        Optional<String> url = linkedSignUrl(worldId, dimensionId, hit.getBlockPos());
+        if (url.isEmpty()) {
+            return;
+        }
+
+        String key = minecraft.player.isShiftKeyDown()
+                ? "message.minecraft_obsidian.hint_update"
+                : "message.minecraft_obsidian.hint_preview";
+        minecraft.player.displayClientMessage(Component.translatable(key, UrlPreview.fromUrl(url.get())), true);
+    }
+
     private boolean tryOpenLinkedSign(ClientLevel level, String worldId, String dimensionId, ResourceLocation dimension, BlockPos pos, Player player) {
         if (!isSign(level, pos)) {
             if (!isServerBacked()) {
@@ -246,7 +303,7 @@ final class SignInteractionHandler {
         }
 
         if (isServerBacked()) {
-            if (!serverLinkedSigns.contains(pos)) {
+            if (!serverLinkedSigns.containsKey(pos)) {
                 return false;
             }
             PacketDistributor.sendToServer(new ObsidianSignPayloads.OpenSign(dimension, pos));
@@ -266,6 +323,23 @@ final class SignInteractionHandler {
             player.displayClientMessage(Component.translatable("message.minecraft_obsidian.open_failed"), false);
         }
         return true;
+    }
+
+    private boolean isLinkedSign(ClientLevel level, String worldId, String dimensionId, BlockPos pos) {
+        if (!isSign(level, pos)) {
+            return false;
+        }
+        if (isServerBacked()) {
+            return serverLinkedSigns.containsKey(pos);
+        }
+        return store.get(worldId, dimensionId, pos).isPresent();
+    }
+
+    private Optional<String> linkedSignUrl(String worldId, String dimensionId, BlockPos pos) {
+        if (isServerBacked()) {
+            return Optional.ofNullable(serverLinkedSigns.get(pos));
+        }
+        return store.get(worldId, dimensionId, pos);
     }
 
     private void updateStorageMode(Minecraft minecraft, boolean announce) {
@@ -309,7 +383,7 @@ final class SignInteractionHandler {
             return;
         }
         serverLinkedSigns.clear();
-        payload.positions().forEach(pos -> serverLinkedSigns.add(pos.immutable()));
+        payload.entries().forEach(entry -> serverLinkedSigns.put(entry.pos().immutable(), entry.url()));
         requestedSnapshotDimension = payload.dimension();
     }
 
@@ -319,7 +393,7 @@ final class SignInteractionHandler {
             return;
         }
         if (payload.linked()) {
-            serverLinkedSigns.add(payload.pos().immutable());
+            serverLinkedSigns.put(payload.pos().immutable(), payload.url());
         } else {
             serverLinkedSigns.remove(payload.pos());
         }

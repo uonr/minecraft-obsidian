@@ -1,6 +1,9 @@
 {
   "moddisplayname.minecraft_obsidian": "Minecraft Obsidian",
   "message.minecraft_obsidian.clipboard_not_obsidian": "Clipboard is not an Obsidian URL",
+  "message.minecraft_obsidian.hint_linked": "Obsidian link",
+  "message.minecraft_obsidian.hint_preview": "Obsidian: %s",
+  "message.minecraft_obsidian.hint_update": "Obsidian: %s - Shift + Right-click updates from clipboard",
   "message.minecraft_obsidian.invalid_server_url": "Server sent an invalid Obsidian link",
   "message.minecraft_obsidian.link_failed": "Could not link sign",
   "message.minecraft_obsidian.linked_local": "Linked sign to Obsidian URL locally",

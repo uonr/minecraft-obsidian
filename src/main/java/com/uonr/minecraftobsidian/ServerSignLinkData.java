@@ -36,11 +36,11 @@ final class ServerSignLinkData extends SavedData {
         return Optional.ofNullable(links.get(key(dimension, pos)));
     }
 
-    List<BlockPos> linkedPositions(ResourceLocation dimension) {
+    List<ObsidianSignPayloads.LinkedSignEntry> linkedEntries(ResourceLocation dimension) {
         String prefix = dimension + "|";
-        return links.keySet().stream()
-                .filter(key -> key.startsWith(prefix))
-                .map(key -> parsePos(key.substring(prefix.length())))
+        return links.entrySet().stream()
+                .filter(entry -> entry.getKey().startsWith(prefix))
+                .map(entry -> parseEntry(entry, prefix.length()))
                 .flatMap(Optional::stream)
                 .toList();
     }
@@ -80,5 +80,10 @@ final class ServerSignLinkData extends SavedData {
         } catch (NumberFormatException ignored) {
             return Optional.empty();
         }
+    }
+
+    private static Optional<ObsidianSignPayloads.LinkedSignEntry> parseEntry(Map.Entry<String, String> entry, int prefixLength) {
+        return parsePos(entry.getKey().substring(prefixLength))
+                .map(pos -> new ObsidianSignPayloads.LinkedSignEntry(pos, entry.getValue()));
     }
 }
