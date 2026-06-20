@@ -35,12 +35,16 @@ root:
 # Minecraft Sign
 - `Base` → [[Minecraft/Base]]
 - `Central Station` → [[Transit/Hub]]
+- `Search Shops` → [link](obsidian://search?vault=Notes&query=tag:%23shop)
 ```
 
 - The key (in backticks) is the sign's text. Backticks make the key boundary explicit, so any sign
   text is safe. A multi-line sign is matched as its lines joined with single spaces.
-- The value is a normal Obsidian wikilink. Because it lives inside the vault, Obsidian rewrites it
-  automatically when you move or rename the target note — the sign keeps working.
+- The value depends on what you linked:
+  - **A plain note** (`obsidian://open` with just a vault and file) is stored as a wikilink. Because
+    it lives inside the vault, Obsidian rewrites it automatically when you move or rename the note —
+    the sign keeps working.
+  - **Any other Obsidian URL** (search, create, a heading/block anchor, advanced-uri, ...) is kept verbatim as a Markdown link.
 
 You can edit `Minecraft Sign.md` by hand in Obsidian; the mod only needs to read it.
 

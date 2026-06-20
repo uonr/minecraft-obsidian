@@ -98,7 +98,7 @@ final class SignInteractionHandler {
             return;
         }
         Optional<String> clipboard = ObsidianClipboard.readObsidianUrl(minecraft);
-        if (clipboard.flatMap(ObsidianUrls::parseOpenTarget).isEmpty()) {
+        if (clipboard.isEmpty()) {
             return;
         }
 
@@ -198,15 +198,9 @@ final class SignInteractionHandler {
     }
 
     private void performBind(Minecraft minecraft, String key, String url) {
-        Optional<ObsidianUrls.OpenTarget> target = ObsidianUrls.parseOpenTarget(url);
-        if (target.isEmpty()) {
-            minecraft.player.displayClientMessage(Component.translatable("message.minecraft_obsidian.bind_failed"), true);
-            return;
-        }
-
-        SignNoteLinks.BindResult result = links.bind(key, target.get().vault(), target.get().file());
-        MinecraftObsidianClient.LOGGER.debug("[mco] bind vault={} file={} -> success={} ambiguous={} vaultName={}",
-                target.get().vault(), target.get().file(), result.success(), result.ambiguous(), result.vaultName());
+        SignNoteLinks.BindResult result = links.bind(key, url);
+        MinecraftObsidianClient.LOGGER.debug("[mco] bind url={} -> success={} ambiguous={} vaultName={}",
+                url, result.success(), result.ambiguous(), result.vaultName());
         if (!result.success()) {
             minecraft.player.displayClientMessage(Component.translatable("message.minecraft_obsidian.bind_failed"), true);
         } else if (result.ambiguous()) {
@@ -257,7 +251,7 @@ final class SignInteractionHandler {
         String update = null;
         if (minecraft.player.isShiftKeyDown()) {
             Optional<String> clipboard = ObsidianClipboard.readObsidianUrl(minecraft);
-            if (clipboard.isPresent() && ObsidianUrls.parseOpenTarget(clipboard.get()).isPresent()) {
+            if (clipboard.isPresent()) {
                 String clipboardUrl = UrlPreview.fromUrl(clipboard.get());
                 if (!clipboardUrl.equals(current)) {
                     update = clipboardUrl;

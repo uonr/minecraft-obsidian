@@ -9,31 +9,35 @@ import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
 /**
- * Resolves a sign's text to an Obsidian note via per-vault {@code Minecraft Sign.md} files.
+ * Resolves a sign's text to an Obsidian target via per-vault {@code Minecraft Sign.md} files.
  *
- * <p>Each vault keeps its own mapping file at its root, holding {@code `key` -> [[Note]]} entries.
- * Storing the target as a wikilink lets Obsidian keep it up to date when the note is moved or
- * renamed, so the link survives reorganization for free. The sign itself only carries the human
- * readable key, and the owning vault is found by scanning all vaults at lookup time.
+ * <p>Each vault keeps its own mapping file at its root. A simple "open this note" link is stored as
+ * a wikilink ({@code `key` -> [[Note]]}) so Obsidian keeps it up to date when the note is moved or
+ * renamed. Any other Obsidian URL (search, create, a heading/block anchor, advanced-uri, ...) is
+ * kept verbatim as a Markdown link ({@code `key` -> [link](obsidian://...)}). The sign only carries
+ * the human readable key; the owning vault is found by scanning all vaults at lookup time.
  */
 final class SignNoteLinks {
     static final String MAPPING_FILE_NAME = "Minecraft Sign.md";
 
-    record Resolution(ObsidianVault vault, String linkTarget, boolean ambiguous) {
+    /** A resolved target: either a wikilink (note path) or a verbatim Obsidian URL. */
+    record NoteLink(boolean wikilink, String value) {
+    }
+
+    record Resolution(ObsidianVault vault, NoteLink link, boolean ambiguous) {
     }
 
     record BindResult(boolean success, boolean ambiguous, String vaultName) {
     }
 
-    private record ParsedEntry(String key, String linkRaw) {
+    private record ParsedEntry(String key, NoteLink link) {
     }
 
-    private record CachedFile(long modified, Map<String, String> entries) {
+    private record CachedFile(long modified, Map<String, NoteLink> entries) {
     }
 
     private List<ObsidianVault> vaults = List.of();
@@ -68,30 +72,48 @@ final class SignNoteLinks {
             return Optional.empty();
         }
         ObsidianVault matchedVault = null;
-        String matchedTarget = null;
+        NoteLink matchedLink = null;
         int matches = 0;
         for (ObsidianVault vault : vaults) {
-            String target = entriesFor(vault).get(key);
-            if (target != null) {
+            NoteLink link = entriesFor(vault).get(key);
+            if (link != null) {
                 matches++;
                 if (matchedVault == null) {
                     matchedVault = vault;
-                    matchedTarget = target;
+                    matchedLink = link;
                 }
             }
         }
         if (matchedVault == null) {
             return Optional.empty();
         }
-        return Optional.of(new Resolution(matchedVault, matchedTarget, matches > 1));
+        return Optional.of(new Resolution(matchedVault, matchedLink, matches > 1));
     }
 
-    /** Writes {@code key -> [[file]]} into the vault referenced by {@code vaultRef} (its id or name). */
-    BindResult bind(String key, String vaultRef, String file) {
+    /**
+     * Writes {@code key -> link} for the clipboard {@code url}. A simple note-open URL becomes a
+     * wikilink in the owning vault; anything else is stored verbatim as a Markdown link.
+     */
+    BindResult bind(String key, String url) {
         refresh();
-        ObsidianVault target = findVault(vaultRef);
-        if (target == null || key == null || key.isEmpty() || file == null || file.isBlank()) {
-            return new BindResult(false, false, target == null ? null : target.name());
+        if (key == null || key.isEmpty() || url == null || url.isBlank() || vaults.isEmpty()) {
+            return new BindResult(false, false, null);
+        }
+
+        Optional<ObsidianUrls.OpenTarget> open = ObsidianUrls.isSimpleNoteOpen(url)
+                ? ObsidianUrls.parseOpenTarget(url)
+                : Optional.empty();
+        ObsidianVault noteVault = open.map(target -> findVault(target.vault())).orElse(null);
+
+        ObsidianVault target;
+        NoteLink link;
+        if (open.isPresent() && noteVault != null) {
+            target = noteVault;
+            link = new NoteLink(true, stripMdExtension(open.get().file()));
+        } else {
+            ObsidianVault byParam = findVault(ObsidianUrls.queryParam(url, "vault").orElse(null));
+            target = byParam != null ? byParam : vaults.get(0);
+            link = new NoteLink(false, url.trim());
         }
 
         boolean usedElsewhere = false;
@@ -102,7 +124,7 @@ final class SignNoteLinks {
             }
         }
 
-        boolean ok = writeEntry(target, key, file);
+        boolean ok = writeEntry(target, key, link);
         if (ok) {
             cache.remove(mappingFile(target));
             refresh();
@@ -110,18 +132,26 @@ final class SignNoteLinks {
         return new BindResult(ok, usedElsewhere, target.name());
     }
 
-    /** Builds an {@code obsidian://open} URL using the vault id (stable across renames). */
+    /** The URL actually opened. Wikilinks use the vault id (stable across renames); URLs pass through. */
     static String openUrl(Resolution resolution) {
-        String file = fileFromLink(resolution.linkTarget());
+        NoteLink link = resolution.link();
+        if (!link.wikilink()) {
+            return link.value();
+        }
+        String file = fileFromLink(link.value());
         return "obsidian://open?vault=" + encode(resolution.vault().id()) + "&file=" + encode(file);
     }
 
-    /** A readable {@code obsidian://open} URL (vault name, undecoded path) for on-screen previews. */
+    /** A readable form for on-screen previews. */
     static String displayUrl(Resolution resolution) {
-        return "obsidian://open?vault=" + resolution.vault().name() + "&file=" + fileFromLink(resolution.linkTarget());
+        NoteLink link = resolution.link();
+        if (!link.wikilink()) {
+            return link.value();
+        }
+        return "obsidian://open?vault=" + resolution.vault().name() + "&file=" + fileFromLink(link.value());
     }
 
-    private Map<String, String> entriesFor(ObsidianVault vault) {
+    private Map<String, NoteLink> entriesFor(ObsidianVault vault) {
         CachedFile cached = cache.get(mappingFile(vault));
         return cached == null ? Map.of() : cached.entries();
     }
@@ -149,9 +179,9 @@ final class SignNoteLinks {
         return null;
     }
 
-    private boolean writeEntry(ObsidianVault vault, String key, String file) {
+    private boolean writeEntry(ObsidianVault vault, String key, NoteLink link) {
         Path path = mappingFile(vault);
-        String entryLine = "- " + MarkdownInlineCode.encode(key) + " → [[" + stripMdExtension(file) + "]]";
+        String entryLine = "- " + MarkdownInlineCode.encode(key) + " → " + render(link);
         try {
             List<String> lines = Files.isRegularFile(path)
                     ? new ArrayList<>(Files.readAllLines(path, StandardCharsets.UTF_8))
@@ -189,14 +219,24 @@ final class SignNoteLinks {
         }
     }
 
-    private static Map<String, String> parse(Path file) {
-        Map<String, String> entries = new LinkedHashMap<>();
+    /** Renders the value side of an entry. URLs with spaces or parentheses use the angle-bracket form. */
+    private static String render(NoteLink link) {
+        if (link.wikilink()) {
+            return "[[" + link.value() + "]]";
+        }
+        String url = link.value();
+        boolean needsAngles = url.indexOf('(') >= 0 || url.indexOf(')') >= 0 || containsWhitespace(url);
+        return needsAngles ? "[link](<" + url + ">)" : "[link](" + url + ")";
+    }
+
+    private static Map<String, NoteLink> parse(Path file) {
+        Map<String, NoteLink> entries = new LinkedHashMap<>();
         if (!Files.isRegularFile(file)) {
             return entries;
         }
         try {
             for (String line : Files.readAllLines(file, StandardCharsets.UTF_8)) {
-                parseLine(line).ifPresent(entry -> entries.putIfAbsent(entry.key(), entry.linkRaw()));
+                parseLine(line).ifPresent(entry -> entries.putIfAbsent(entry.key(), entry.link()));
             }
         } catch (IOException | RuntimeException exception) {
             MinecraftObsidianClient.LOGGER.warn("Could not read Obsidian mapping file {}", file, exception);
@@ -214,6 +254,12 @@ final class SignNoteLinks {
             return Optional.empty();
         }
         String rest = line.substring(span.get().end());
+
+        Optional<String> markdownUrl = markdownLinkUrl(rest);
+        if (markdownUrl.isPresent() && ObsidianUrls.isObsidianUrl(markdownUrl.get())) {
+            return Optional.of(new ParsedEntry(key, new NoteLink(false, markdownUrl.get())));
+        }
+
         int open = rest.indexOf("[[");
         if (open < 0) {
             return Optional.empty();
@@ -226,7 +272,39 @@ final class SignNoteLinks {
         if (linkRaw.isEmpty()) {
             return Optional.empty();
         }
-        return Optional.of(new ParsedEntry(key, linkRaw));
+        return Optional.of(new ParsedEntry(key, new NoteLink(true, linkRaw)));
+    }
+
+    /** Extracts the destination of the first {@code [label](url)} or {@code [label](<url>)} on the line. */
+    private static Optional<String> markdownLinkUrl(String rest) {
+        int label = rest.indexOf('[');
+        if (label < 0) {
+            return Optional.empty();
+        }
+        int sep = rest.indexOf("](", label);
+        if (sep < 0) {
+            return Optional.empty();
+        }
+        int urlStart = sep + 2;
+        if (urlStart >= rest.length()) {
+            return Optional.empty();
+        }
+        String url;
+        if (rest.charAt(urlStart) == '<') {
+            int end = rest.indexOf('>', urlStart + 1);
+            if (end < 0) {
+                return Optional.empty();
+            }
+            url = rest.substring(urlStart + 1, end);
+        } else {
+            int end = rest.indexOf(')', urlStart);
+            if (end < 0) {
+                return Optional.empty();
+            }
+            url = rest.substring(urlStart, end);
+        }
+        url = url.trim();
+        return url.isEmpty() ? Optional.empty() : Optional.of(url);
     }
 
     /** Reduces a wikilink target to the bare file path: drops a {@code |alias} and any {@code #}/{@code ^} ref. */
@@ -253,6 +331,15 @@ final class SignNoteLinks {
             return value.substring(0, value.length() - 3);
         }
         return value;
+    }
+
+    private static boolean containsWhitespace(String value) {
+        for (int i = 0; i < value.length(); i++) {
+            if (Character.isWhitespace(value.charAt(i))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static Path mappingFile(ObsidianVault vault) {

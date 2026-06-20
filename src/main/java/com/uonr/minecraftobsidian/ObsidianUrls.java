@@ -48,6 +48,67 @@ final class ObsidianUrls {
         }
     }
 
+    /**
+     * True only for a plain "open this note" URL: action {@code open}, with just {@code vault} and
+     * {@code file} (and no heading/block anchor). Those become wikilinks; everything else is kept
+     * verbatim as a Markdown link.
+     */
+    static boolean isSimpleNoteOpen(String url) {
+        if (!isObsidianUrl(url)) {
+            return false;
+        }
+        try {
+            URI uri = new URI(url.trim());
+            if (!"open".equalsIgnoreCase(uri.getHost())) {
+                return false;
+            }
+            String query = uri.getRawQuery();
+            if (query == null) {
+                return false;
+            }
+            boolean hasFile = false;
+            for (String pair : query.split("&")) {
+                int eq = pair.indexOf('=');
+                String name = eq >= 0 ? pair.substring(0, eq) : pair;
+                if (name.equals("file")) {
+                    hasFile = true;
+                    String file = decode(eq >= 0 ? pair.substring(eq + 1) : "");
+                    if (file.indexOf('#') >= 0 || file.indexOf('^') >= 0) {
+                        return false;
+                    }
+                } else if (!name.equals("vault")) {
+                    return false;
+                }
+            }
+            return hasFile;
+        } catch (URISyntaxException exception) {
+            return false;
+        }
+    }
+
+    /** Value of a query parameter on an Obsidian URL, percent-decoded. */
+    static Optional<String> queryParam(String url, String name) {
+        if (!isObsidianUrl(url)) {
+            return Optional.empty();
+        }
+        try {
+            String query = new URI(url.trim()).getRawQuery();
+            if (query == null) {
+                return Optional.empty();
+            }
+            for (String pair : query.split("&")) {
+                int eq = pair.indexOf('=');
+                String key = eq >= 0 ? pair.substring(0, eq) : pair;
+                if (key.equals(name)) {
+                    return Optional.of(decode(eq >= 0 ? pair.substring(eq + 1) : ""));
+                }
+            }
+            return Optional.empty();
+        } catch (URISyntaxException exception) {
+            return Optional.empty();
+        }
+    }
+
     private static String decode(String value) {
         try {
             return URLDecoder.decode(value, StandardCharsets.UTF_8);
