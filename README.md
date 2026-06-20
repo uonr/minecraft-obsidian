@@ -1,6 +1,8 @@
 # Minecraft Obsidian
 
-Link Minecraft signs to Obsidian URLs and open them with a right-click.
+Link Minecraft signs to Obsidian notes and open them with a right-click.
+
+The sign's own text is the link. Each vault keeps a `Minecraft Sign.md` file at its root mapping that text to a note. This is a client-side mod.
 
 ## Requirements
 
@@ -24,43 +26,54 @@ build/libs/minecraft_obsidian-1.0.0.jar
 
 to the `mods` directory of your Minecraft instance.
 
-For multiplayer server-backed storage, install the same jar on both the client and the server. If the server does not have the mod installed, the client automatically falls back to local storage.
+## How It Works
+
+Vaults are discovered automatically from Obsidian's registry (`obsidian.json`). For each vault, the mod reads and maintains a mapping file at the vault
+root:
+
+```text
+# Minecraft Sign
+- `Base` → [[Minecraft/Base]]
+- `Central Station` → [[Transit/Hub]]
+```
+
+- The key (in backticks) is the sign's text. Backticks make the key boundary explicit, so any sign
+  text is safe. A multi-line sign is matched as its lines joined with single spaces.
+- The value is a normal Obsidian wikilink. Because it lives inside the vault, Obsidian rewrites it
+  automatically when you move or rename the target note — the sign keeps working.
+
+You can edit `Minecraft Sign.md` by hand in Obsidian; the mod only needs to read it.
 
 ## Usage
 
-### Link a New Sign
+First, in Obsidian copy the note's URL (Command Palette → "Copy Obsidian URL"), e.g.:
 
-1. Copy an Obsidian URL, for example:
+```text
+obsidian://open?vault=Notes&file=Minecraft/Base
+```
 
-   ```text
-   obsidian://open?vault=Notes&file=Minecraft/Base
-   ```
+Then link a sign either way:
 
-2. Hold a sign item.
-3. Hold Shift and place the sign.
-4. The sign is linked after placement succeeds.
+- **While placing**: hold Shift and place a sign, then write its text (for example `Base`). It is
+  linked automatically once you finish editing.
+- **An existing sign**: hold Shift and right-click a sign that already has text.
+
+Either way the mod finds the vault from the copied URL and writes `` `Base` → [[Minecraft/Base]] ``
+into that vault's `Minecraft Sign.md`. Shift + right-click again with a different URL to update it.
 
 ### Open a Linked Sign
 
-Right-click a linked sign.
+Right-click a linked sign. The mod looks up the sign's text across your vaults and opens the note.
 
-The mod opens the associated `obsidian://` URL. Vanilla sign interaction may still happen, so editable signs can still open their edit screen.
+### Update a Link
 
-### Update a Linked Sign
-
-1. Copy a new `obsidian://...` URL.
-2. Hold Shift.
-3. Right-click an already linked sign.
-
-The sign's link is updated to the URL currently in the clipboard.
+Copy a different note's URL and Shift + right-click the sign again; the entry is rewritten.
 
 ### Remove a Link
 
-Break the linked sign.
+Delete the entry from `Minecraft Sign.md` (in Obsidian, or any editor). Editing the sign's text
+changes its key, which leaves the old entry orphaned — prune it the same way.
 
-## Storage Modes
+## Notes
 
-Minecraft Obsidian supports two storage modes:
-
-- **Server-backed storage**: used in singleplayer and on servers that have this mod installed. Links are stored on the sign block entity as a NeoForge data attachment and can be shared by players who have the client mod.
-- **Local fallback storage**: used on multiplayer servers that do not have this mod installed. Links are stored in the client's config directory at `config/minecraft_obsidian/links.json`.
+- Only the front side of a sign is read.

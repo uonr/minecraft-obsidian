@@ -1,64 +1,63 @@
 package com.uonr.minecraftobsidian;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 
 import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.screens.inventory.AbstractSignEditScreen;
 import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.client.multiplayer.ServerData;
 import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceKey;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.SignItem;
-import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.SignBlock;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.entity.SignBlockEntity;
+import net.minecraft.world.level.block.entity.SignText;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.bus.api.SubscribeEvent;
-import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.RenderGuiEvent;
 import net.neoforged.neoforge.client.event.RenderHighlightEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
-import net.neoforged.neoforge.network.PacketDistributor;
 
+/**
+ * Client-side sign behavior backed by per-vault {@code Minecraft Sign.md} mapping files.
+ *
+ * <ul>
+ *   <li>Right-click a sign whose text is a known key: open the linked Obsidian note.</li>
+ *   <li>Shift + right-click with an {@code obsidian://open?...} URL in the clipboard: bind the
+ *       sign's text to that note (writes a wikilink entry into the owning vault's mapping file).</li>
+ *   <li>Shift + place a sign with such a URL in the clipboard: bind automatically once the placed
+ *       sign has text.</li>
+ * </ul>
+ */
 final class SignInteractionHandler {
-    private static final int CONFIRM_TICKS = 8;
-    private static final int REMOVAL_CONFIRM_TICKS = 80;
-    private static final int LOCAL_CLEANUP_INTERVAL_TICKS = 200;
-    private static final int LOCAL_CLEANUP_MAX_CHECKS = 16;
-    private static final int SERVER_SNAPSHOT_INTERVAL_TICKS = 100;
+    private static final int SIGN_LINES = 4;
+    private static final int REFRESH_INTERVAL_TICKS = 20;
+    // Window to wait for a freshly placed sign to gain text before auto-binding the clipboard URL.
+    private static final int PLACEMENT_TIMEOUT_TICKS = 1200;
 
-    private final SignLinkStore store;
+    private final SignNoteLinks links;
     private final List<PendingPlacement> pendingPlacements = new ArrayList<>();
-    private final List<PendingRemoval> pendingRemovals = new ArrayList<>();
-    private final Map<BlockPos, String> serverLinkedSigns = new HashMap<>();
-    private StorageMode storageMode = StorageMode.UNKNOWN;
-    private ResourceLocation requestedSnapshotDimension;
     private PreviewState previewState;
-    private int localCleanupTicks;
-    private int localCleanupIndex;
-    private int serverSnapshotTicks;
+    private int refreshTicks;
 
-    SignInteractionHandler(SignLinkStore store) {
-        this.store = store;
-        ClientSignPayloadHandler.setSignInteractionHandler(this);
+    SignInteractionHandler(SignNoteLinks links) {
+        this.links = links;
     }
 
     @SubscribeEvent
@@ -73,66 +72,39 @@ final class SignInteractionHandler {
         if (level == null || minecraft.player == null || player != minecraft.player) {
             return;
         }
-        updateStorageMode(minecraft, false);
 
-        String worldId = currentWorldId(minecraft);
-        String dimensionId = dimensionId(level.dimension());
-        ResourceLocation dimension = level.dimension().location();
-        BlockPos clickedPos = event.getPos();
-
-        if (tryUpdateLinkedSign(level, worldId, dimensionId, dimension, clickedPos, player, minecraft)) {
-            event.setCanceled(true);
-            event.setCancellationResult(InteractionResult.SUCCESS);
+        BlockPos pos = event.getPos();
+        if (isSign(level, pos)) {
+            MinecraftObsidianClient.LOGGER.debug("[mco] sign right-click at {} sneaking={} key={}",
+                    pos, player.isShiftKeyDown(), signKey(level, pos).orElse("<none>"));
+            links.refresh();
+            if (tryBind(level, pos, player, minecraft) || tryOpen(level, pos, minecraft)) {
+                event.setCanceled(true);
+                event.setCancellationResult(InteractionResult.SUCCESS);
+            }
             return;
         }
 
-        if (tryOpenLinkedSign(level, worldId, dimensionId, dimension, clickedPos, player)) {
-            event.setCanceled(true);
-            event.setCancellationResult(InteractionResult.SUCCESS);
-            return;
-        }
+        schedulePlacementBind(level, event, player, minecraft);
+    }
 
+    /**
+     * When a sign is being placed with an Obsidian URL on the clipboard, remember the candidate
+     * positions and bind the link once the placed sign has text (i.e. after the edit screen closes).
+     */
+    private void schedulePlacementBind(ClientLevel level, PlayerInteractEvent.RightClickBlock event, Player player, Minecraft minecraft) {
         ItemStack stack = event.getItemStack();
-        if (!(stack.getItem() instanceof SignItem)) {
+        if (!(stack.getItem() instanceof SignItem) || !player.isShiftKeyDown()) {
+            return;
+        }
+        Optional<String> clipboard = ObsidianClipboard.readObsidianUrl(minecraft);
+        if (clipboard.flatMap(ObsidianUrls::parseOpenTarget).isEmpty()) {
             return;
         }
 
         List<BlockPos> candidates = placementCandidates(level, event.getHitVec());
-        cleanupLocalPlacementCandidates(worldId, dimensionId, candidates);
-
-        if (!player.isShiftKeyDown()) {
-            return;
-        }
-
-        Optional<String> url = ObsidianClipboard.readObsidianUrl(minecraft);
-        if (url.isEmpty()) {
-            return;
-        }
-
         if (!candidates.isEmpty()) {
-            pendingPlacements.add(new PendingPlacement(worldId, dimensionId, candidates, url.get()));
-        }
-    }
-
-    @SubscribeEvent
-    public void onLeftClickBlock(PlayerInteractEvent.LeftClickBlock event) {
-        if (!event.getLevel().isClientSide()) {
-            return;
-        }
-
-        Minecraft minecraft = Minecraft.getInstance();
-        ClientLevel level = minecraft.level;
-        Player player = event.getEntity();
-        if (level == null || minecraft.player == null || player != minecraft.player) {
-            return;
-        }
-        updateStorageMode(minecraft, false);
-
-        BlockPos pos = event.getPos();
-        String worldId = currentWorldId(minecraft);
-        String dimensionId = dimensionId(level.dimension());
-        if (isSign(level, pos) && (isServerBacked() || store.get(worldId, dimensionId, pos).isPresent())) {
-            addOrRefreshPendingRemoval(worldId, dimensionId, pos);
+            pendingPlacements.add(new PendingPlacement(candidates, clipboard.get()));
         }
     }
 
@@ -141,23 +113,40 @@ final class SignInteractionHandler {
         Minecraft minecraft = Minecraft.getInstance();
         ClientLevel level = minecraft.level;
         if (level == null || minecraft.player == null) {
+            previewState = null;
             pendingPlacements.clear();
-            pendingRemovals.clear();
-            storageMode = StorageMode.UNKNOWN;
-            return;
-        }
-        updateStorageMode(minecraft, true);
-        String worldId = currentWorldId(minecraft);
-        String dimensionId = dimensionId(level.dimension());
-        previewState = createPreviewState(minecraft, level, worldId, dimensionId).orElse(null);
-        cleanupLoadedLocalLinks(level, worldId, dimensionId);
-
-        if (pendingPlacements.isEmpty() && pendingRemovals.isEmpty()) {
             return;
         }
 
-        processPendingPlacements(minecraft, level, worldId, dimensionId);
-        processPendingRemovals(minecraft, level, worldId, dimensionId);
+        if (++refreshTicks >= REFRESH_INTERVAL_TICKS) {
+            refreshTicks = 0;
+            links.refresh();
+        }
+        processPendingPlacements(minecraft, level);
+        previewState = createPreviewState(minecraft, level).orElse(null);
+    }
+
+    private void processPendingPlacements(Minecraft minecraft, ClientLevel level) {
+        // While the sign edit screen is open its text updates live; wait until the player closes it
+        // so we bind the finished text, not whatever was typed so far.
+        if (minecraft.screen instanceof AbstractSignEditScreen) {
+            return;
+        }
+
+        Iterator<PendingPlacement> iterator = pendingPlacements.iterator();
+        while (iterator.hasNext()) {
+            PendingPlacement pending = iterator.next();
+            Optional<BlockPos> placed = pending.candidates.stream()
+                    .filter(candidate -> signKey(level, candidate).isPresent())
+                    .findFirst();
+            if (placed.isPresent()) {
+                links.refresh();
+                performBind(minecraft, signKey(level, placed.get()).get(), pending.url);
+                iterator.remove();
+            } else if (pending.tickDownAndExpired()) {
+                iterator.remove();
+            }
+        }
     }
 
     @SubscribeEvent
@@ -169,7 +158,8 @@ final class SignInteractionHandler {
         }
 
         BlockPos pos = event.getTarget().getBlockPos();
-        if (!isLinkedSign(level, currentWorldId(minecraft), dimensionId(level.dimension()), pos)) {
+        Optional<String> key = signKey(level, pos);
+        if (key.isEmpty() || !links.contains(key.get())) {
             return;
         }
 
@@ -191,297 +181,94 @@ final class SignInteractionHandler {
         renderPreviewPanel(event.getGuiGraphics(), minecraft.font, previewState);
     }
 
-    @SubscribeEvent
-    public void onLoggingOut(ClientPlayerNetworkEvent.LoggingOut event) {
-        pendingPlacements.clear();
-        pendingRemovals.clear();
-        serverLinkedSigns.clear();
-        requestedSnapshotDimension = null;
-        previewState = null;
-        localCleanupTicks = 0;
-        localCleanupIndex = 0;
-        serverSnapshotTicks = 0;
-        storageMode = StorageMode.UNKNOWN;
-    }
-
-    private void processPendingPlacements(Minecraft minecraft, ClientLevel level, String worldId, String dimensionId) {
-        Iterator<PendingPlacement> iterator = pendingPlacements.iterator();
-        while (iterator.hasNext()) {
-            PendingPlacement pending = iterator.next();
-            if (!pending.matches(worldId, dimensionId)) {
-                iterator.remove();
-                continue;
-            }
-
-            Optional<BlockPos> placedSign = pending.findPlacedSign(level);
-            if (placedSign.isPresent()) {
-                BlockPos pos = placedSign.get();
-                if (isServerBacked()) {
-                    PacketDistributor.sendToServer(new ObsidianSignPayloads.BindSign(level.dimension().location(), pos, pending.url()));
-                } else {
-                    store.put(worldId, dimensionId, pos, pending.url());
-                    minecraft.player.displayClientMessage(Component.translatable("message.minecraft_obsidian.linked_local"), true);
-                }
-                iterator.remove();
-                continue;
-            }
-
-            if (pending.tickDownAndExpired()) {
-                iterator.remove();
-            }
+    private boolean tryBind(ClientLevel level, BlockPos pos, Player player, Minecraft minecraft) {
+        if (!player.isShiftKeyDown()) {
+            return false;
         }
-    }
-
-    private void processPendingRemovals(Minecraft minecraft, ClientLevel level, String worldId, String dimensionId) {
-        Iterator<PendingRemoval> iterator = pendingRemovals.iterator();
-        while (iterator.hasNext()) {
-            PendingRemoval pending = iterator.next();
-            if (!pending.matches(worldId, dimensionId)) {
-                iterator.remove();
-                continue;
-            }
-
-            if (!isSign(level, pending.pos())) {
-                if (isServerBacked()) {
-                    PacketDistributor.sendToServer(new ObsidianSignPayloads.RemoveSign(level.dimension().location(), pending.pos()));
-                } else {
-                    store.remove(worldId, dimensionId, pending.pos());
-                    minecraft.player.displayClientMessage(Component.translatable("message.minecraft_obsidian.removed_local"), true);
-                }
-                iterator.remove();
-                continue;
-            }
-
-            if (pending.tickDownAndExpired()) {
-                iterator.remove();
-            }
-        }
-    }
-
-    private void addOrRefreshPendingRemoval(String worldId, String dimensionId, BlockPos pos) {
-        for (PendingRemoval pending : pendingRemovals) {
-            if (pending.matches(worldId, dimensionId) && pending.pos().equals(pos)) {
-                pending.refresh();
-                return;
-            }
-        }
-        pendingRemovals.add(new PendingRemoval(worldId, dimensionId, pos));
-    }
-
-    private void cleanupLoadedLocalLinks(ClientLevel level, String worldId, String dimensionId) {
-        if (isServerBacked()) {
-            localCleanupTicks = 0;
-            localCleanupIndex = 0;
-            return;
-        }
-
-        localCleanupTicks++;
-        if (localCleanupTicks < LOCAL_CLEANUP_INTERVAL_TICKS) {
-            return;
-        }
-        localCleanupTicks = 0;
-
-        List<BlockPos> positions = store.positions(worldId, dimensionId);
-        if (positions.isEmpty()) {
-            localCleanupIndex = 0;
-            return;
-        }
-        if (localCleanupIndex >= positions.size()) {
-            localCleanupIndex = 0;
-        }
-
-        int checks = Math.min(LOCAL_CLEANUP_MAX_CHECKS, positions.size());
-        for (int checked = 0; checked < checks; checked++) {
-            BlockPos pos = positions.get(localCleanupIndex);
-            localCleanupIndex = (localCleanupIndex + 1) % positions.size();
-            if (level.isLoaded(pos) && !isSign(level, pos)) {
-                store.remove(worldId, dimensionId, pos);
-            }
-        }
-    }
-
-    private void cleanupLocalPlacementCandidates(String worldId, String dimensionId, List<BlockPos> candidates) {
-        if (isServerBacked()) {
-            return;
-        }
-        for (BlockPos pos : candidates) {
-            store.remove(worldId, dimensionId, pos);
-        }
-    }
-
-    private static void renderObsidianOutline(RenderHighlightEvent.Block event, AABB bounds) {
-        var buffer = event.getMultiBufferSource().getBuffer(RenderType.lines());
-        // Layered boxes make the outline read thicker while staying in vanilla's line renderer.
-        LevelRenderer.renderLineBox(event.getPoseStack(), buffer, bounds.inflate(0.004D), 0.47F, 0.18F, 0.95F, 1.0F);
-        LevelRenderer.renderLineBox(event.getPoseStack(), buffer, bounds.inflate(0.010D), 0.64F, 0.30F, 1.0F, 0.92F);
-        LevelRenderer.renderLineBox(event.getPoseStack(), buffer, bounds.inflate(0.016D), 0.24F, 0.04F, 0.55F, 0.82F);
-    }
-
-    private boolean tryUpdateLinkedSign(ClientLevel level, String worldId, String dimensionId, ResourceLocation dimension, BlockPos pos, Player player, Minecraft minecraft) {
-        if (!player.isShiftKeyDown() || !isSign(level, pos)) {
+        Optional<String> key = signKey(level, pos);
+        Optional<String> clipboard = ObsidianClipboard.readObsidianUrl(minecraft);
+        MinecraftObsidianClient.LOGGER.debug("[mco] bind check key={} clipboardObsidianUrl={}",
+                key.orElse("<none>"), clipboard.orElse("<none>"));
+        if (key.isEmpty() || clipboard.isEmpty()) {
             return false;
         }
 
-        Optional<String> url = ObsidianClipboard.readObsidianUrl(minecraft);
-        if (url.isEmpty()) {
-            return false;
+        performBind(minecraft, key.get(), clipboard.get());
+        return true;
+    }
+
+    private void performBind(Minecraft minecraft, String key, String url) {
+        Optional<ObsidianUrls.OpenTarget> target = ObsidianUrls.parseOpenTarget(url);
+        if (target.isEmpty()) {
+            minecraft.player.displayClientMessage(Component.translatable("message.minecraft_obsidian.bind_failed"), true);
+            return;
         }
 
-        if (isServerBacked()) {
-            if (!serverLinkedSigns.containsKey(pos)) {
-                return false;
-            }
-            PacketDistributor.sendToServer(new ObsidianSignPayloads.BindSign(dimension, pos, url.get()));
+        SignNoteLinks.BindResult result = links.bind(key, target.get().vault(), target.get().file());
+        MinecraftObsidianClient.LOGGER.debug("[mco] bind vault={} file={} -> success={} ambiguous={} vaultName={}",
+                target.get().vault(), target.get().file(), result.success(), result.ambiguous(), result.vaultName());
+        if (!result.success()) {
+            minecraft.player.displayClientMessage(Component.translatable("message.minecraft_obsidian.bind_failed"), true);
+        } else if (result.ambiguous()) {
+            minecraft.player.displayClientMessage(
+                    Component.translatable("message.minecraft_obsidian.bind_ambiguous", result.vaultName()), false);
         } else {
-            if (store.get(worldId, dimensionId, pos).isEmpty()) {
-                return false;
-            }
-            store.put(worldId, dimensionId, pos, url.get());
-            minecraft.player.displayClientMessage(Component.translatable("message.minecraft_obsidian.updated_local"), true);
+            minecraft.player.displayClientMessage(
+                    Component.translatable("message.minecraft_obsidian.bound", result.vaultName()), true);
+        }
+    }
+
+    private boolean tryOpen(ClientLevel level, BlockPos pos, Minecraft minecraft) {
+        Optional<String> key = signKey(level, pos);
+        if (key.isEmpty()) {
+            return false;
+        }
+        Optional<SignNoteLinks.Resolution> resolution = links.resolve(key.get());
+        if (resolution.isEmpty()) {
+            return false;
+        }
+
+        String url = SignNoteLinks.openUrl(resolution.get());
+        try {
+            Util.getPlatform().openUri(url);
+            minecraft.player.displayClientMessage(Component.translatable(resolution.get().ambiguous()
+                    ? "message.minecraft_obsidian.open_ambiguous"
+                    : "message.minecraft_obsidian.opened"), true);
+        } catch (RuntimeException exception) {
+            MinecraftObsidianClient.LOGGER.warn("Could not open Obsidian URL {}", url, exception);
+            minecraft.player.displayClientMessage(Component.translatable("message.minecraft_obsidian.open_failed"), false);
         }
         return true;
     }
 
-    private Optional<PreviewState> createPreviewState(Minecraft minecraft, ClientLevel level, String worldId, String dimensionId) {
+    private Optional<PreviewState> createPreviewState(Minecraft minecraft, ClientLevel level) {
         if (!(minecraft.hitResult instanceof BlockHitResult hit) || hit.getType() != HitResult.Type.BLOCK) {
             return Optional.empty();
         }
-        if (!isLinkedSign(level, worldId, dimensionId, hit.getBlockPos())) {
+        Optional<String> key = signKey(level, hit.getBlockPos());
+        if (key.isEmpty()) {
             return Optional.empty();
         }
 
-        Optional<String> currentUrl = linkedSignUrl(worldId, dimensionId, hit.getBlockPos());
-        if (currentUrl.isEmpty()) {
+        String current = links.resolve(key.get())
+                .map(resolution -> UrlPreview.fromUrl(SignNoteLinks.displayUrl(resolution)))
+                .orElse(null);
+
+        String update = null;
+        if (minecraft.player.isShiftKeyDown()) {
+            Optional<String> clipboard = ObsidianClipboard.readObsidianUrl(minecraft);
+            if (clipboard.isPresent() && ObsidianUrls.parseOpenTarget(clipboard.get()).isPresent()) {
+                String clipboardUrl = UrlPreview.fromUrl(clipboard.get());
+                if (!clipboardUrl.equals(current)) {
+                    update = clipboardUrl;
+                }
+            }
+        }
+
+        if (current == null && update == null) {
             return Optional.empty();
         }
-
-        Optional<String> clipboardUrl = minecraft.player.isShiftKeyDown()
-                ? ObsidianClipboard.readObsidianUrl(minecraft)
-                : Optional.empty();
-        if (clipboardUrl.isPresent() && !clipboardUrl.get().equals(currentUrl.get())) {
-            return Optional.of(new PreviewState(UrlPreview.fromUrl(currentUrl.get()), UrlPreview.fromUrl(clipboardUrl.get())));
-        }
-        return Optional.of(new PreviewState(UrlPreview.fromUrl(currentUrl.get()), null));
-    }
-
-    private boolean tryOpenLinkedSign(ClientLevel level, String worldId, String dimensionId, ResourceLocation dimension, BlockPos pos, Player player) {
-        if (!isSign(level, pos)) {
-            if (!isServerBacked()) {
-                store.remove(worldId, dimensionId, pos);
-            }
-            return false;
-        }
-
-        if (isServerBacked()) {
-            if (!serverLinkedSigns.containsKey(pos)) {
-                return false;
-            }
-            PacketDistributor.sendToServer(new ObsidianSignPayloads.OpenSign(dimension, pos));
-            return true;
-        }
-
-        Optional<String> url = store.get(worldId, dimensionId, pos);
-        if (url.isEmpty()) {
-            return false;
-        }
-
-        try {
-            Util.getPlatform().openUri(url.get());
-            player.displayClientMessage(Component.translatable("message.minecraft_obsidian.opened"), true);
-        } catch (RuntimeException exception) {
-            MinecraftObsidianClient.LOGGER.warn("Could not open Obsidian URL {}", url.get(), exception);
-            player.displayClientMessage(Component.translatable("message.minecraft_obsidian.open_failed"), false);
-        }
-        return true;
-    }
-
-    private boolean isLinkedSign(ClientLevel level, String worldId, String dimensionId, BlockPos pos) {
-        if (!isSign(level, pos)) {
-            return false;
-        }
-        if (isServerBacked()) {
-            return serverLinkedSigns.containsKey(pos);
-        }
-        return store.get(worldId, dimensionId, pos).isPresent();
-    }
-
-    private Optional<String> linkedSignUrl(String worldId, String dimensionId, BlockPos pos) {
-        if (isServerBacked()) {
-            return Optional.ofNullable(serverLinkedSigns.get(pos));
-        }
-        return store.get(worldId, dimensionId, pos);
-    }
-
-    private void updateStorageMode(Minecraft minecraft, boolean announce) {
-        if (minecraft.getConnection() == null || minecraft.player == null) {
-            return;
-        }
-
-        StorageMode newMode = minecraft.getConnection().hasChannel(ObsidianSignPayloads.BindSign.TYPE) ? StorageMode.SERVER : StorageMode.LOCAL;
-        if (newMode == storageMode) {
-            if (newMode == StorageMode.SERVER) {
-                requestLinkedSignsSnapshot(minecraft);
-            }
-            return;
-        }
-
-        storageMode = newMode;
-        serverLinkedSigns.clear();
-        requestedSnapshotDimension = null;
-        serverSnapshotTicks = 0;
-        if (announce) {
-            String messageKey = switch (storageMode) {
-                case SERVER -> "message.minecraft_obsidian.mode_server";
-                case LOCAL -> "message.minecraft_obsidian.mode_local";
-                case UNKNOWN -> "";
-            };
-            if (!messageKey.isEmpty()) {
-                minecraft.player.displayClientMessage(Component.translatable(messageKey), false);
-            }
-        }
-        if (storageMode == StorageMode.SERVER) {
-            requestLinkedSignsSnapshot(minecraft);
-        }
-    }
-
-    private boolean isServerBacked() {
-        return storageMode == StorageMode.SERVER;
-    }
-
-    void handleLinkedSignsSnapshot(ObsidianSignPayloads.LinkedSignsSnapshot payload) {
-        Minecraft minecraft = Minecraft.getInstance();
-        if (minecraft.level == null || !minecraft.level.dimension().location().equals(payload.dimension())) {
-            return;
-        }
-        serverLinkedSigns.clear();
-        payload.entries().forEach(entry -> serverLinkedSigns.put(entry.pos().immutable(), entry.url()));
-        requestedSnapshotDimension = payload.dimension();
-    }
-
-    void handleLinkedSignUpdate(ObsidianSignPayloads.LinkedSignUpdate payload) {
-        Minecraft minecraft = Minecraft.getInstance();
-        if (minecraft.level == null || !minecraft.level.dimension().location().equals(payload.dimension())) {
-            return;
-        }
-        if (payload.linked()) {
-            serverLinkedSigns.put(payload.pos().immutable(), payload.url());
-        } else {
-            serverLinkedSigns.remove(payload.pos());
-        }
-    }
-
-    private void requestLinkedSignsSnapshot(Minecraft minecraft) {
-        if (minecraft.level == null || minecraft.getConnection() == null) {
-            return;
-        }
-        ResourceLocation dimension = minecraft.level.dimension().location();
-        if (dimension.equals(requestedSnapshotDimension) && serverSnapshotTicks < SERVER_SNAPSHOT_INTERVAL_TICKS) {
-            serverSnapshotTicks++;
-            return;
-        }
-        serverSnapshotTicks = 0;
-        requestedSnapshotDimension = dimension;
-        PacketDistributor.sendToServer(new ObsidianSignPayloads.RequestLinkedSigns(dimension));
+        return Optional.of(new PreviewState(current, update));
     }
 
     private static List<BlockPos> placementCandidates(ClientLevel level, BlockHitResult hit) {
@@ -497,41 +284,58 @@ final class SignInteractionHandler {
         }
     }
 
+    private static Optional<String> signKey(ClientLevel level, BlockPos pos) {
+        if (!isSign(level, pos)) {
+            return Optional.empty();
+        }
+        BlockEntity blockEntity = level.getBlockEntity(pos);
+        if (!(blockEntity instanceof SignBlockEntity sign)) {
+            return Optional.empty();
+        }
+
+        SignText text = sign.getFrontText();
+        String[] lines = new String[SIGN_LINES];
+        for (int i = 0; i < SIGN_LINES; i++) {
+            lines[i] = text.getMessage(i, false).getString();
+        }
+        String key = SignKey.fromLines(lines);
+        return key.isEmpty() ? Optional.empty() : Optional.of(key);
+    }
+
     private static boolean isSign(ClientLevel level, BlockPos pos) {
-        BlockState state = level.getBlockState(pos);
-        return state.getBlock() instanceof SignBlock;
+        return level.getBlockState(pos).getBlock() instanceof SignBlock;
     }
 
-    private static String currentWorldId(Minecraft minecraft) {
-        ServerData server = minecraft.getCurrentServer();
-        if (server != null && server.ip != null && !server.ip.isBlank()) {
-            return "server:" + server.ip;
-        }
-        if (minecraft.hasSingleplayerServer() && minecraft.getSingleplayerServer() != null) {
-            return "singleplayer:" + minecraft.getSingleplayerServer().getWorldData().getLevelName();
-        }
-        return "unknown";
-    }
-
-    private static String dimensionId(ResourceKey<Level> dimension) {
-        return dimension.location().toString();
+    private static void renderObsidianOutline(RenderHighlightEvent.Block event, AABB bounds) {
+        var buffer = event.getMultiBufferSource().getBuffer(RenderType.lines());
+        // Layered boxes make the outline read thicker while staying in vanilla's line renderer.
+        LevelRenderer.renderLineBox(event.getPoseStack(), buffer, bounds.inflate(0.004D), 0.47F, 0.18F, 0.95F, 1.0F);
+        LevelRenderer.renderLineBox(event.getPoseStack(), buffer, bounds.inflate(0.010D), 0.64F, 0.30F, 1.0F, 0.92F);
+        LevelRenderer.renderLineBox(event.getPoseStack(), buffer, bounds.inflate(0.016D), 0.24F, 0.04F, 0.55F, 0.82F);
     }
 
     private static void renderPreviewPanel(GuiGraphics gui, Font font, PreviewState state) {
         int maxWidth = Math.min((int) (gui.guiWidth() * 0.72F), 420);
         int contentWidth = Math.max(120, maxWidth - 20);
-        String current = fitMiddle(font, state.currentUrl(), contentWidth);
-        String updatePrefix = Component.translatable("message.minecraft_obsidian.preview_update_prefix").getString();
-        String update = state.updateUrl() == null ? null : updatePrefix + fitMiddle(font, state.updateUrl(), Math.max(20, contentWidth - font.width(updatePrefix)));
 
-        int panelWidth = font.width(current);
+        String current = state.current() == null ? null : fitMiddle(font, state.current(), contentWidth);
+        String update = null;
+        if (state.update() != null) {
+            String prefix = Component.translatable("message.minecraft_obsidian.preview_update_prefix").getString();
+            update = prefix + fitMiddle(font, state.update(), Math.max(20, contentWidth - font.width(prefix)));
+        }
+
+        int panelWidth = 0;
+        if (current != null) {
+            panelWidth = font.width(current);
+        }
         if (update != null) {
             panelWidth = Math.max(panelWidth, font.width(update));
         }
         panelWidth = Math.min(panelWidth + 20, maxWidth);
 
-        int lines = update == null ? 1 : 2;
-        int panelHeight = lines == 1 ? 22 : 34;
+        int lines = (current != null ? 1 : 0) + (update != null ? 1 : 0);
+        int panelHeight = lines <= 1 ? 22 : 34;
         int x = (gui.guiWidth() - panelWidth) / 2;
         int y = Math.max(12, gui.guiHeight() / 2 + 24);
 
@@ -541,9 +345,13 @@ final class SignInteractionHandler {
         gui.fill(x, y, x + 1, y + panelHeight, 0xFF6E32D8);
         gui.fill(x + panelWidth - 1, y, x + panelWidth, y + panelHeight, 0xFF6E32D8);
 
-        gui.drawString(font, current, x + 10, y + 7, 0xFFE9DDFF, false);
+        int textY = y + 7;
+        if (current != null) {
+            gui.drawString(font, current, x + 10, textY, 0xFFE9DDFF, false);
+            textY += 12;
+        }
         if (update != null) {
-            gui.drawString(font, update, x + 10, y + 19, 0xFFBFA7FF, false);
+            gui.drawString(font, update, x + 10, textY, 0xFFBFA7FF, false);
         }
     }
 
@@ -576,76 +384,21 @@ final class SignInteractionHandler {
         return marker;
     }
 
-    private enum StorageMode {
-        UNKNOWN,
-        LOCAL,
-        SERVER
-    }
-
-    private record PreviewState(String currentUrl, String updateUrl) {
+    private record PreviewState(String current, String update) {
     }
 
     private static final class PendingPlacement {
-        private final String worldId;
-        private final String dimensionId;
         private final List<BlockPos> candidates;
         private final String url;
-        private int ticksRemaining;
+        private int ticksRemaining = PLACEMENT_TIMEOUT_TICKS;
 
-        PendingPlacement(String worldId, String dimensionId, List<BlockPos> candidates, String url) {
-            this.worldId = worldId;
-            this.dimensionId = dimensionId;
+        PendingPlacement(List<BlockPos> candidates, String url) {
             this.candidates = List.copyOf(candidates);
             this.url = url;
-            this.ticksRemaining = CONFIRM_TICKS;
-        }
-
-        String url() {
-            return url;
-        }
-
-        boolean matches(String currentWorldId, String currentDimensionId) {
-            return worldId.equals(currentWorldId) && dimensionId.equals(currentDimensionId);
-        }
-
-        Optional<BlockPos> findPlacedSign(ClientLevel level) {
-            return candidates.stream().filter(pos -> isSign(level, pos)).findFirst();
         }
 
         boolean tickDownAndExpired() {
-            ticksRemaining--;
-            return ticksRemaining <= 0;
-        }
-    }
-
-    private static final class PendingRemoval {
-        private final String worldId;
-        private final String dimensionId;
-        private final BlockPos pos;
-        private int ticksRemaining;
-
-        PendingRemoval(String worldId, String dimensionId, BlockPos pos) {
-            this.worldId = worldId;
-            this.dimensionId = dimensionId;
-            this.pos = pos.immutable();
-            this.ticksRemaining = REMOVAL_CONFIRM_TICKS;
-        }
-
-        BlockPos pos() {
-            return pos;
-        }
-
-        boolean matches(String currentWorldId, String currentDimensionId) {
-            return worldId.equals(currentWorldId) && dimensionId.equals(currentDimensionId);
-        }
-
-        void refresh() {
-            ticksRemaining = REMOVAL_CONFIRM_TICKS;
-        }
-
-        boolean tickDownAndExpired() {
-            ticksRemaining--;
-            return ticksRemaining <= 0;
+            return --ticksRemaining <= 0;
         }
     }
 }
